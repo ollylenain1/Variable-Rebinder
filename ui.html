@@ -21,6 +21,7 @@
 
       :root,
       [data-theme="light"] {
+        color-scheme: light;
         /* Backgrounds — Neutral 000 / 100 / 300 */
         --bg: #f6f6f6;
         --surface: #ffffff; /* Neutral 000 light */
@@ -73,10 +74,51 @@
         --font-mono: "SF Mono", "Fira Code", "Menlo", monospace;
       }
 
-      /* Dark mode — system preference + manual override */
+      /* Dark mode — explicit override */
+      [data-theme="dark"] {
+        --bg: #292b3d;
+        --surface: #161b2f;
+        --surface2: #161b2f;
+        --border: #646774; /* Neutral 300 dark */
+        --border-accent: #979aa3; /* Neutral 700 dark */
+
+        --text: #ffffff; /* Title dark */
+        --text-muted: #cbccd1; /* Neutral 900 dark */
+        --text-dim: #979aa3; /* Neutral 700 dark */
+
+        --accent: #3696fc; /* Interactive dark */
+        --accent-hover: #006de3;
+        --accent-dim: rgba(54, 150, 252, 0.15);
+
+        --green: #32d74b; /* Success dark */
+        --green-dim: rgba(50, 215, 75, 0.12);
+        --red: #ff5b4b; /* Error dark */
+        --red-dim: rgba(255, 91, 75, 0.12);
+        --yellow: #ffc21c; /* Warning dark */
+        --yellow-dim: rgba(255, 194, 28, 0.15);
+        --info: #3696fc; /* Information dark */
+
+        --info-light-bg: #192744;
+        --success-light-bg: #192e32;
+        --warning-light-bg: #2d2c2d;
+        --error-light-bg: #2d1f30;
+
+        --header-bg: linear-gradient(180deg, #202742 0%, #171d34 100%);
+        --header-border: rgba(203, 204, 209, 0.1);
+        --header-text: #ffffff;
+        --header-muted: #cbccd1;
+        --header-divider: rgba(203, 204, 209, 0.14);
+        --header-scope-border: rgba(203, 204, 209, 0.18);
+        --header-scope-color: #cbccd1;
+        --logo-text-fill: #ffffff;
+        --shadow-sm: 0 12px 28px rgba(0, 0, 0, 0.16);
+        --shadow-lg: 0 18px 38px rgba(0, 0, 0, 0.24);
+        color-scheme: dark;
+      }
+
+      /* Dark mode — auto follow system only when no explicit theme is set */
       @media (prefers-color-scheme: dark) {
-        :root:not([data-theme="light"]),
-        [data-theme="dark"] {
+        :root:not([data-theme="light"]):not([data-theme="dark"]) {
           --bg: #292b3d;
           --surface: #161b2f;
           --surface2: #161b2f;
@@ -114,6 +156,7 @@
           --logo-text-fill: #ffffff;
           --shadow-sm: 0 12px 28px rgba(0, 0, 0, 0.16);
           --shadow-lg: 0 18px 38px rgba(0, 0, 0, 0.24);
+          color-scheme: dark;
         }
       }
 
@@ -2547,9 +2590,12 @@
         recentCollectionKeys: [],
         mappings: {},
         nodeMappings: {},
+        nodeIdsByVariable: {},
         nodesByVariable: {},
+        nodeDetailsById: {},
         nodeSummaryByVariable: {},
         pendingVariableNodes: {},
+        pendingNodeDetailRequests: [],
         boundIdToKey: {},
         boundIdToName: {},
         boundIdToCollectionKey: {},
@@ -2713,6 +2759,18 @@
 
       function normalizeVariableRecord(variable) {
         if (!variable) return variable;
+        if (Array.isArray(variable)) {
+          variable = {
+            id: variable[0],
+            name: variable[1],
+            key: variable[2],
+            resolvedType: variable[3],
+            collectionId: variable[4],
+            collectionName: variable[5],
+            libraryName: variable[6],
+            broken: !!variable[7],
+          };
+        }
         const pathSegments = String(variable.name || "")
           .split("/")
           .map((segment) => segment.trim());
@@ -2734,6 +2792,49 @@
       function normalizeVariableRecords(variables) {
         return Array.isArray(variables)
           ? variables.map(normalizeVariableRecord)
+          : [];
+      }
+
+      function decodeNodeSummaryEntries(entries) {
+        if (!Array.isArray(entries)) return entries || {};
+        const decoded = {};
+        entries.forEach((entry) => {
+          if (!Array.isArray(entry) || !entry[0]) return;
+          decoded[entry[0]] = {
+            c: Number(entry[1]) || 0,
+            h: Number(entry[2]) || 0,
+            i: !!entry[3],
+          };
+        });
+        return decoded;
+      }
+
+      function decodeLookupEntries(entries) {
+        if (!Array.isArray(entries)) return entries || {};
+        const decoded = {};
+        entries.forEach((entry) => {
+          if (!Array.isArray(entry) || entry.length < 2 || !entry[0]) return;
+          decoded[entry[0]] = entry[1];
+        });
+        return decoded;
+      }
+
+      function decodeNodeDetails(nodes) {
+        return Array.isArray(nodes)
+          ? nodes
+              .map((node) => {
+                if (Array.isArray(node)) {
+                  return {
+                    id: node[0],
+                    n: node[1],
+                    t: node[2],
+                    p: node[3],
+                    h: !!node[4],
+                  };
+                }
+                return node;
+              })
+              .filter(Boolean)
           : [];
       }
 
@@ -2793,8 +2894,8 @@
 
       function requestVariableNodes(variableId, callback) {
         if (!variableId || typeof callback !== "function") return;
-        if (state.nodesByVariable[variableId]) {
-          callback(state.nodesByVariable[variableId]);
+        if (state.nodeIdsByVariable[variableId]) {
+          callback(state.nodeIdsByVariable[variableId]);
           return;
         }
         if (!state.pendingVariableNodes[variableId]) {
@@ -2810,6 +2911,83 @@
           );
         }
         state.pendingVariableNodes[variableId].push(callback);
+      }
+
+      function flushPendingNodeDetailRequests() {
+        const remaining = [];
+        state.pendingNodeDetailRequests.forEach((request) => {
+          const ready = request.ids.every((id) =>
+            Object.prototype.hasOwnProperty.call(state.nodeDetailsById, id),
+          );
+          if (!ready) {
+            remaining.push(request);
+            return;
+          }
+          try {
+            request.callback(
+              request.ids
+                .map((id) => state.nodeDetailsById[id])
+                .filter(Boolean),
+            );
+          } catch (err) {
+            console.warn("node-details callback failed:", String(err));
+          }
+        });
+        state.pendingNodeDetailRequests = remaining;
+      }
+
+      function requestNodeDetails(nodeIds, callback) {
+        if (typeof callback !== "function") return;
+        const ids = Array.from(new Set((nodeIds || []).filter(Boolean)));
+        if (ids.length === 0) {
+          callback([]);
+          return;
+        }
+
+        const missingIds = ids.filter(
+          (id) => !Object.prototype.hasOwnProperty.call(state.nodeDetailsById, id),
+        );
+        if (missingIds.length === 0) {
+          callback(ids.map((id) => state.nodeDetailsById[id]).filter(Boolean));
+          return;
+        }
+
+        state.pendingNodeDetailRequests.push({ ids, callback });
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "get-node-details",
+              nodeIds: missingIds,
+            },
+          },
+          "*",
+        );
+      }
+
+      function hydrateVariableNodes(variableId, callback) {
+        const nodeIds = state.nodeIdsByVariable[variableId] || [];
+        if (nodeIds.length === 0) {
+          state.nodesByVariable[variableId] = [];
+          callback([]);
+          return;
+        }
+        if (
+          nodeIds.every((id) =>
+            Object.prototype.hasOwnProperty.call(state.nodeDetailsById, id),
+          )
+        ) {
+          const nodes = nodeIds
+            .map((id) => state.nodeDetailsById[id])
+            .filter(Boolean);
+          state.nodesByVariable[variableId] = nodes;
+          callback(nodes);
+          return;
+        }
+
+        requestNodeDetails(nodeIds, (nodes) => {
+          state.nodesByVariable[variableId] = nodes;
+          callback(nodes);
+        });
       }
 
       function disconnectGroupRenderObserver() {
@@ -2868,8 +3046,11 @@
         state.pendingLibraryRequests = {};
         state.pendingVariableNodes = {};
         state.pendingSubSelects = {};
+        state.nodeIdsByVariable = {};
         state.nodesByVariable = {};
+        state.nodeDetailsById = {};
         state.nodeSummaryByVariable = {};
+        state.pendingNodeDetailRequests = [];
         state.boundIdToKey = {};
         state.boundIdToName = {};
         state.boundIdToCollectionKey = {};
@@ -2933,12 +3114,15 @@
         state.sourceVariablesByCollectionId[sourceKey].push(variable);
       }
 
-      function mergeScannedVariables(variables, nodeSummaryByVariable, stats) {
+      function mergeScannedVariables(variables, nodeSummaryEntries, stats) {
         const normalizedVariables = normalizeVariableRecords(variables || []);
         const appendedVariables = [];
         const seenIds = new Set(state.variables.map((variable) => variable.id));
 
-        Object.assign(state.nodeSummaryByVariable, nodeSummaryByVariable || {});
+        Object.assign(
+          state.nodeSummaryByVariable,
+          decodeNodeSummaryEntries(nodeSummaryEntries),
+        );
 
         normalizedVariables.forEach((variable) => {
           if (!variable || seenIds.has(variable.id)) return;
@@ -3285,7 +3469,7 @@
         if (msg.type === "scan-chunk") {
           const appendedVariables = mergeScannedVariables(
             msg.variables,
-            msg.nodeSummaryByVariable,
+            msg.nodeSummaryEntries,
             msg.stats,
           );
           state.scanStatus = Object.assign(
@@ -3311,14 +3495,18 @@
           state.scanInProgress = false;
           state.scanStatus = null;
           state.emptyMessage = msg.message || "";
+          mergeScannedVariables(msg.variables, msg.nodeSummaryEntries, msg.stats);
           state.libraryCollections =
             msg.libraryCollections || state.libraryCollections;
-          state.boundIdToKey = msg.boundIdToKey || {};
-          state.boundIdToName = msg.boundIdToName || {};
-          state.boundIdToCollectionKey = msg.boundIdToCollectionKey || {};
-          state.variableKeyToCollectionKey =
-            msg.variableKeyToCollectionKey || {};
-          state.idRemap = msg.idRemap || {};
+          state.boundIdToKey = decodeLookupEntries(msg.boundIdToKeyEntries);
+          state.boundIdToName = decodeLookupEntries(msg.boundIdToNameEntries);
+          state.boundIdToCollectionKey = decodeLookupEntries(
+            msg.boundIdToCollectionKeyEntries,
+          );
+          state.variableKeyToCollectionKey = decodeLookupEntries(
+            msg.variableKeyToCollectionKeyEntries,
+          );
+          state.idRemap = decodeLookupEntries(msg.idRemapEntries);
           state.stats = msg.stats || state.stats;
           state.nodeMappings = {};
           if (usagesModalRef) {
@@ -3362,14 +3550,21 @@
           state.banner = null;
           state.emptyMessage = msg.message || "";
           state.libraryCollections = msg.libraryCollections || [];
+          state.nodeIdsByVariable = {};
           state.nodesByVariable = {};
-          state.nodeSummaryByVariable = msg.nodeSummaryByVariable || {};
-          state.boundIdToKey = msg.boundIdToKey || {};
-          state.boundIdToName = msg.boundIdToName || {};
-          state.boundIdToCollectionKey = msg.boundIdToCollectionKey || {};
-          state.variableKeyToCollectionKey =
-            msg.variableKeyToCollectionKey || {};
-          state.idRemap = msg.idRemap || {};
+          state.nodeDetailsById = {};
+          state.nodeSummaryByVariable = decodeNodeSummaryEntries(
+            msg.nodeSummaryEntries,
+          );
+          state.boundIdToKey = decodeLookupEntries(msg.boundIdToKeyEntries);
+          state.boundIdToName = decodeLookupEntries(msg.boundIdToNameEntries);
+          state.boundIdToCollectionKey = decodeLookupEntries(
+            msg.boundIdToCollectionKeyEntries,
+          );
+          state.variableKeyToCollectionKey = decodeLookupEntries(
+            msg.variableKeyToCollectionKeyEntries,
+          );
+          state.idRemap = decodeLookupEntries(msg.idRemapEntries);
           state.stats = msg.stats || null;
           state.scanned = true;
           state.mappings = {};
@@ -3428,17 +3623,41 @@
             showBanner("Could not load layer usage: " + msg.error, "error");
             return;
           }
-          const nodes = Array.isArray(msg.nodes) ? msg.nodes : [];
-          state.nodesByVariable[msg.variableId] = nodes;
+          const nodeIds = Array.isArray(msg.nodeIds) ? msg.nodeIds : [];
+          state.nodeIdsByVariable[msg.variableId] = nodeIds;
           const pending = state.pendingVariableNodes[msg.variableId] || [];
           delete state.pendingVariableNodes[msg.variableId];
           pending.forEach((callback) => {
             try {
-              callback(nodes);
+              callback(nodeIds);
             } catch (err) {
               console.warn("variable-nodes callback failed:", String(err));
             }
           });
+        }
+
+        if (msg.type === "node-details-result") {
+          if (msg.error) {
+            showBanner("Could not load layer details: " + msg.error, "error");
+            return;
+          }
+          const requestedIds = Array.isArray(msg.nodeIds) ? msg.nodeIds : [];
+          const nodes = decodeNodeDetails(msg.nodes);
+          const seenIds = {};
+          nodes.forEach((node) => {
+            if (!node || !node.id) return;
+            state.nodeDetailsById[node.id] = node;
+            seenIds[node.id] = true;
+          });
+          requestedIds.forEach((id) => {
+            if (
+              id &&
+              !Object.prototype.hasOwnProperty.call(state.nodeDetailsById, id)
+            ) {
+              state.nodeDetailsById[id] = null;
+            }
+          });
+          flushPendingNodeDetailRequests();
         }
 
         if (msg.type === "rebind-result") {
@@ -4037,10 +4256,7 @@
       </div>
     </div>
     <div id="bulkTgtVarRow" class="bulk-target-row">
-      <div class="select-wrap">
-        <select id="bulkTgtVarSel"><option value="">— loading variables… —</option></select>
-        <span class="select-arrow">▾</span>
-      </div>
+      <div id="bulkTgtVarPickerHost"></div>
     </div>
     <div id="bulkStatus" class="bulk-status"></div>
     <button class="btn btn-secondary btn-sm bulk-apply-btn" id="bulkApplyBtn" disabled>Apply to All Matching</button>
@@ -4060,16 +4276,17 @@
         const srcSel = panel.querySelector("#bulkSrcSel");
         const tgtColSel = panel.querySelector("#bulkTgtColSel");
         const tgtVarRow = panel.querySelector("#bulkTgtVarRow");
-        const tgtVarSel = panel.querySelector("#bulkTgtVarSel");
+        const tgtVarPickerHost = panel.querySelector("#bulkTgtVarPickerHost");
         const bulkStatus = panel.querySelector("#bulkStatus");
         const applyBtn = panel.querySelector("#bulkApplyBtn");
 
         let selectedSourceLib = null;
         let selectedTargetCollection = null;
+        let selectedTargetVar = null;
         let targetVars = [];
 
         function checkReady() {
-          const varSelected = tgtVarSel.value !== "";
+          const varSelected = !!selectedTargetVar;
           applyBtn.disabled =
             !selectedSourceLib || !selectedTargetCollection || !varSelected;
         }
@@ -4082,11 +4299,13 @@
 
         tgtColSel.addEventListener("change", () => {
           tgtVarRow.style.display = "none";
-          tgtVarSel.innerHTML = '<option value="">— loading… —</option>';
+          tgtVarPickerHost.innerHTML = "";
+          selectedTargetVar = null;
           applyBtn.disabled = true;
           const idx = tgtColSel.value;
           if (idx === "") {
             selectedTargetCollection = null;
+            targetVars = [];
             return;
           }
           selectedTargetCollection = getCollectionAtIndex(
@@ -4112,23 +4331,25 @@
 
         function populateBulkVarSel(vars) {
           targetVars = vars;
-          tgtVarSel.innerHTML =
-            '<option value="">— choose a target variable (name-matched by default) —</option>' +
-            vars
-              .map((v, i) => `<option value="${i}">${escHtml(v.name)}</option>`)
-              .join("");
+          selectedTargetVar = null;
+          tgtVarPickerHost.innerHTML = "";
+          const picker = buildGroupedPicker({
+            variables: vars,
+            selectedKey: null,
+            placeholder: "— choose a target variable —",
+            onChange: (selectedVar) => {
+              selectedTargetVar = selectedVar || null;
+              checkReady();
+            },
+          });
+          tgtVarPickerHost.appendChild(picker);
           tgtVarRow.style.display = "block";
           checkReady();
         }
 
-        tgtVarSel.addEventListener("change", checkReady);
-
         applyBtn.addEventListener("click", () => {
           if (!selectedSourceLib || !selectedTargetCollection) return;
-          const selectedVar =
-            tgtVarSel.value !== ""
-              ? targetVars[parseInt(tgtVarSel.value)]
-              : null;
+          const selectedVar = selectedTargetVar;
           const targetVarByName = new Map();
           const targetVarByLeafName = new Map();
           targetVars.forEach((targetVar) => {
@@ -4533,6 +4754,7 @@
         titleEl.textContent = variable.name;
         subtitleEl.textContent = "Layers using this variable";
         hiddenOnlyEl.checked = false;
+        overlay._nodeIds = state.nodeIdsByVariable[variable.id] || null;
         overlay._nodes = state.nodesByVariable[variable.id] || null;
 
         overlay._render = () => {
@@ -4574,8 +4796,18 @@
         overlay._render();
         overlay.classList.add("open");
 
-        if (!overlay._nodes) {
-          requestVariableNodes(variable.id, (nodes) => {
+        if (!overlay._nodeIds) {
+          requestVariableNodes(variable.id, (nodeIds) => {
+            overlay._nodeIds = nodeIds || [];
+            hydrateVariableNodes(variable.id, (nodes) => {
+              overlay._nodes = nodes || [];
+              if (overlay.classList.contains("open")) {
+                overlay._render();
+              }
+            });
+          });
+        } else if (!overlay._nodes) {
+          hydrateVariableNodes(variable.id, (nodes) => {
             overlay._nodes = nodes || [];
             if (overlay.classList.contains("open")) {
               overlay._render();
