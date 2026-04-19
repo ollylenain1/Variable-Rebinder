@@ -1,0 +1,5567 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blueprint: Variable Mapper</title>
+    <style>
+      /* ── Reset & Base ── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      /* ────────────────────────────────────────────────────────
+     Blueprint Design System — Token Map
+     Light values from "Light" column, Dark from "Dark" column
+     ──────────────────────────────────────────────────────── */
+
+      :root,
+      [data-theme="light"] {
+        /* Backgrounds — Neutral 000 / 100 / 300 */
+        --bg: #f6f6f6;
+        --surface: #ffffff; /* Neutral 000 light */
+        --surface2: #ffffff;
+        --border: #d7dfda;
+        --border-accent: #8e8e8e; /* Neutral 700 light */
+
+        /* Text — Title / Neutral 900 / 700 */
+        --text: #272727; /* Title light */
+        --text-muted: #515151; /* Neutral 900 light */
+        --text-dim: #8e8e8e; /* Neutral 700 light */
+
+        /* Interactive / Brand */
+        --accent: #006de3; /* Interactive light */
+        --accent-hover: #005bb8;
+        --accent-dim: rgba(0, 109, 227, 0.1);
+
+        /* Status */
+        --green: #09821f; /* Success light */
+        --green-dim: rgba(9, 130, 31, 0.12);
+        --red: #e3000f; /* Error light */
+        --red-dim: rgba(227, 0, 15, 0.1);
+        --yellow: #ffba00; /* Warning light */
+        --yellow-dim: rgba(255, 186, 0, 0.15);
+        --info: #006de3; /* Information light */
+
+        /* Status light backgrounds */
+        --info-light-bg: #e7f0fb;
+        --success-light-bg: #e9f4ea;
+        --warning-light-bg: #fff8e7;
+        --error-light-bg: #fde7e9;
+
+        /* Header (stays light in both modes) */
+        --header-bg: linear-gradient(180deg, #f6f6f6 0%, #f6f6f6 100%);
+        --header-border: rgba(39, 39, 39, 0.08);
+        --header-text: #272727;
+        --header-muted: #515151;
+        --header-divider: rgba(39, 39, 39, 0.12);
+        --header-scope-border: rgba(39, 39, 39, 0.14);
+        --header-scope-color: #515151;
+        --logo-text-fill: #272727;
+        --shadow-sm: 0 10px 24px rgba(26, 33, 66, 0.05);
+        --shadow-lg: 0 18px 38px rgba(26, 33, 66, 0.09);
+
+        --brand: #00aeef;
+        --radius: 14px;
+        --radius-sm: 8px;
+        --font: "Barclays Effra", "Avenir Next", "Segoe UI", sans-serif;
+        --font-heading: "Barclays Effra", "Avenir Next", "Segoe UI", sans-serif;
+        --font-mono: "SF Mono", "Fira Code", "Menlo", monospace;
+      }
+
+      /* Dark mode — system preference + manual override */
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]),
+        [data-theme="dark"] {
+          --bg: #292b3d;
+          --surface: #161b2f;
+          --surface2: #161b2f;
+          --border: #646774; /* Neutral 300 dark */
+          --border-accent: #979aa3; /* Neutral 700 dark */
+
+          --text: #ffffff; /* Title dark */
+          --text-muted: #cbccd1; /* Neutral 900 dark */
+          --text-dim: #979aa3; /* Neutral 700 dark */
+
+          --accent: #3696fc; /* Interactive dark */
+          --accent-hover: #006de3;
+          --accent-dim: rgba(54, 150, 252, 0.15);
+
+          --green: #32d74b; /* Success dark */
+          --green-dim: rgba(50, 215, 75, 0.12);
+          --red: #ff5b4b; /* Error dark */
+          --red-dim: rgba(255, 91, 75, 0.12);
+          --yellow: #ffc21c; /* Warning dark */
+          --yellow-dim: rgba(255, 194, 28, 0.15);
+          --info: #3696fc; /* Information dark */
+
+          --info-light-bg: #192744;
+          --success-light-bg: #192e32;
+          --warning-light-bg: #2d2c2d;
+          --error-light-bg: #2d1f30;
+
+          --header-bg: linear-gradient(180deg, #202742 0%, #171d34 100%);
+          --header-border: rgba(203, 204, 209, 0.1);
+          --header-text: #ffffff;
+          --header-muted: #cbccd1;
+          --header-divider: rgba(203, 204, 209, 0.14);
+          --header-scope-border: rgba(203, 204, 209, 0.18);
+          --header-scope-color: #cbccd1;
+          --logo-text-fill: #ffffff;
+          --shadow-sm: 0 12px 28px rgba(0, 0, 0, 0.16);
+          --shadow-lg: 0 18px 38px rgba(0, 0, 0, 0.24);
+        }
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 13px;
+        line-height: 1.45;
+        letter-spacing: -0.01em;
+        overflow: hidden;
+      }
+
+      /* ── Layout ── */
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      header {
+        padding: 16px 16px 14px;
+        border-bottom: 1px solid var(--header-border);
+        background: var(--header-bg);
+        flex-shrink: 0;
+        position: relative;
+      }
+
+      .header-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+
+      h1 {
+        color: var(--header-text);
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .logo-wrap {
+        height: 24px;
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+      }
+
+      .logo-wrap svg {
+        height: 24px;
+        width: auto;
+      }
+
+      /* Blueprint wordmark text paths adapt via CSS variable */
+      .logo-text-path {
+        fill: var(--logo-text-fill);
+      }
+
+      .header-divider {
+        width: 1px;
+        height: 30px;
+        background: var(--header-divider);
+        flex-shrink: 0;
+      }
+
+      .header-subtitle {
+        font-family: var(--font-heading);
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 1;
+        color: #515151;
+        letter-spacing: -0.03em;
+      }
+
+      [data-theme="dark"] .header-subtitle {
+        color: #cbccd1;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) .header-subtitle {
+          color: #cbccd1;
+        }
+      }
+
+      .scope-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .scope-label {
+        font-size: 10px;
+        color: var(--header-muted);
+        margin-right: 2px;
+        text-transform: capitalize;
+        letter-spacing: 0em;
+        font-weight: 700;
+      }
+
+      .scope-btn {
+        padding: 6px 12px;
+        border: 1px solid var(--header-scope-border);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--header-scope-color);
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.18s ease;
+        letter-spacing: 0em;
+        text-transform: capitalize;
+      }
+
+      .scope-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .scope-btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #ffffff;
+        box-shadow: 0 8px 18px rgba(0, 109, 227, 0.22);
+      }
+
+      #resetBtn {
+        color: var(--header-muted) !important;
+      }
+      #resetBtn:hover {
+        color: var(--header-text) !important;
+      }
+
+      /* ── Three-way theme switcher ── */
+      .theme-switcher {
+        display: flex;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.38);
+        border: 1px solid var(--header-scope-border);
+        border-radius: 999px;
+        padding: 2px;
+        gap: 1px;
+        transition: all 0.15s;
+      }
+
+      .theme-opt {
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        border: none;
+        background: transparent;
+        color: var(--header-muted);
+        font-size: 11px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s;
+        padding: 0;
+        line-height: 1;
+      }
+
+      .theme-opt:hover {
+        color: var(--header-text);
+      }
+
+      .theme-opt.active {
+        background: var(--surface);
+        color: var(--accent);
+        box-shadow: var(--shadow-sm);
+      }
+
+      main {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      main::-webkit-scrollbar {
+        width: 4px;
+      }
+      main::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      main::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 2px;
+      }
+
+      footer {
+        padding: 14px 16px;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        backdrop-filter: blur(10px);
+      }
+
+      /* ── Buttons ── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 9px 18px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: all 0.18s ease;
+        white-space: nowrap;
+        letter-spacing: 0em;
+        text-transform: capitalize;
+      }
+
+      .btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      /* Primary — solid blue pill */
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .btn-primary:hover:not(:disabled) {
+        background: var(--accent-hover);
+        border-color: var(--accent-hover);
+        transform: translateY(-1px);
+      }
+
+      /* Secondary — outline blue pill */
+      .btn-secondary {
+        background: var(--surface);
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--accent-dim);
+        transform: translateY(-1px);
+      }
+
+      /* Ghost — no border, muted text */
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-muted);
+        border-color: transparent;
+        font-weight: 600;
+      }
+      .btn-ghost:hover:not(:disabled) {
+        color: var(--text);
+      }
+
+      .btn-sm {
+        padding: 6px 11px;
+        font-size: 10px;
+      }
+      .btn-full {
+        width: 100%;
+      }
+      .btn-icon {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border-radius: 999px;
+        border-width: 1.5px;
+      }
+
+      /* ── Empty / Welcome State ── */
+      .welcome {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        min-width: 0;
+        width: min(100%, 880px);
+        align-self: center;
+        background: var(--surface);
+        border: 0.5px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+      }
+
+      /* ── Hero band ── */
+      .welcome-hero {
+        position: relative;
+        padding: 20px 18px 18px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+        overflow: hidden;
+      }
+
+      .welcome-hero-glow {
+        position: absolute;
+        top: -32px;
+        left: -32px;
+        width: 140px;
+        height: 140px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          rgba(0, 109, 227, 0.18) 0%,
+          transparent 70%
+        );
+        pointer-events: none;
+      }
+
+      .welcome-hero-icon-wrap {
+        position: relative;
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .welcome-hero-text {
+        flex: 1;
+        min-width: 0;
+        padding-top: 1px;
+      }
+
+      .welcome-hero-eyebrow {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0em;
+        text-transform: capitalize;
+        color: var(--accent);
+        margin-bottom: 4px;
+      }
+
+      .welcome h2,
+      .welcome-hero-title {
+        font-family: var(--font-heading);
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        line-height: 1.2;
+        color: var(--text);
+        margin: 0 0 6px;
+      }
+
+      .welcome-hero-body {
+        font-size: 11px;
+        line-height: 1.55;
+        color: var(--text-muted);
+        margin: 0;
+      }
+
+      /* ── Steps ── */
+      .welcome-steps {
+        display: flex;
+        flex-direction: column;
+        padding: 14px 18px 4px;
+      }
+
+      .welcome-step {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        min-width: 0;
+      }
+
+      .welcome-step-track {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        align-self: stretch;
+        flex-shrink: 0;
+        width: 22px;
+      }
+
+      .welcome-step-num {
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--accent);
+        color: #ffffff;
+        font-size: 10px;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+
+      .welcome-step-line {
+        width: 2px;
+        flex: 1;
+        background: var(--border);
+        margin: 4px 0;
+      }
+
+      .welcome-step-content {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding-top: 3px;
+        padding-bottom: 14px;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .welcome-step:last-child .welcome-step-content {
+        padding-bottom: 2px;
+      }
+
+      .welcome-step-text {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+        letter-spacing: -0.01em;
+      }
+
+      .welcome-step-desc {
+        font-size: 11px;
+        color: var(--text-dim);
+        font-weight: 400;
+        line-height: 1.5;
+      }
+
+      /* ── Tip ── */
+      .welcome-tip {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 4px 18px 0;
+        padding: 8px 16px;
+        border-radius: 10px;
+        background: var(--accent-dim);
+        border: 1px solid rgba(0, 109, 227, 0.18);
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--text-muted);
+      }
+
+      .welcome-tip svg {
+        color: var(--accent);
+        flex-shrink: 0;
+      }
+      .welcome-tip strong {
+        color: var(--text);
+      }
+      .welcome-tip em {
+        font-style: normal;
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      /* ── CTA ── */
+      .welcome-cta {
+        margin-top: 16px;
+        padding: 14px 18px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      /* ── Capability pills ── */
+      .welcome-caps {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+        padding: 16 18px 16px;
+      }
+
+      .welcome-cap {
+        font-size: 9px;
+        font-weight: 700;
+        padding: 3px 7px;
+        border-radius: 999px;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        opacity: 0.75;
+      }
+
+      .welcome-cap-sep {
+        color: var(--border);
+        font-size: 13px;
+        line-height: 1;
+        margin: 0 2px;
+      }
+
+      .welcome-cap-label {
+        font-size: 10px;
+        color: var(--text-dim);
+      }
+
+      /* ── Final empty state hints ── */
+      .welcome-empty-hints {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px 18px 18px;
+      }
+
+      .welcome-empty-hint {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--text-muted);
+        padding: 9px 12px;
+        border-radius: 10px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+      }
+
+      .welcome-empty-hint-icon {
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+        color: var(--text-dim);
+        margin-top: 1px;
+      }
+
+      /* ── Status Banner ── */
+      .banner {
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-size: 12px;
+        font-weight: 500;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        border-width: 2px;
+        border-style: solid;
+        line-height: 1.5;
+      }
+
+      .banner svg {
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+
+      .banner-info {
+        background: var(--info-light-bg);
+        border-color: var(--info);
+        color: var(--text);
+      }
+      .banner-success {
+        background: var(--success-light-bg);
+        border-color: var(--green);
+        color: var(--text);
+      }
+      .banner-error {
+        background: var(--error-light-bg);
+        border-color: var(--red);
+        color: var(--text);
+      }
+      .banner-warn {
+        background: var(--warning-light-bg);
+        border-color: var(--yellow);
+        color: var(--text);
+      }
+
+      /* ── Section ── */
+      .section-title {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--text-dim);
+        margin-bottom: 6px;
+      }
+
+      /* ── Variable type groups ── */
+      .var-group-header {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 6px 4px;
+        cursor: pointer;
+        user-select: none;
+        margin-top: 4px;
+      }
+
+      .var-group-header:first-child {
+        margin-top: 0;
+      }
+      .var-group-header:hover .var-group-chevron {
+        color: var(--text);
+      }
+
+      .var-group-chevron {
+        font-size: 10px;
+        color: var(--text-dim);
+        width: 10px;
+        flex-shrink: 0;
+        transition: color 0.15s;
+      }
+
+      .var-group-count {
+        font-size: 11px;
+        color: var(--text-dim);
+        margin-left: 2px;
+      }
+
+      .var-group-body {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+
+      .var-group-body.collapsed {
+        display: none;
+      }
+
+      /* ── Variable Cards ── */
+      .var-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .var-card {
+        background: var(--surface);
+        border: 0.5px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+        transition:
+          border-color 0.18s ease,
+          transform 0.18s ease,
+          box-shadow 0.18s ease;
+      }
+
+      .var-card:hover {
+        border-color: var(--border-accent);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-lg);
+      }
+      .var-card.mapped {
+        border-color: rgba(9, 130, 31, 0.4);
+      }
+      .var-card.just-mapped {
+        animation: mappedPulse 0.48s ease;
+      }
+      .var-card.recent-update {
+        background:
+          linear-gradient(
+            0deg,
+            rgba(74, 186, 98, 0.12),
+            rgba(74, 186, 98, 0.12)
+          ),
+          var(--surface);
+        box-shadow:
+          0 0 0 1px rgba(74, 186, 98, 0.16),
+          var(--shadow-lg);
+      }
+      .var-card.has-errors {
+        border-color: rgba(185, 67, 67, 0.35);
+      }
+      .var-card.mapped .mapped-indicator {
+        background: var(--green);
+      }
+
+      @keyframes mappedPulse {
+        0% {
+          transform: scale(0.992);
+          box-shadow: 0 0 0 0 rgba(74, 186, 98, 0);
+        }
+        45% {
+          transform: scale(1.004);
+          box-shadow: 0 0 0 6px rgba(74, 186, 98, 0.16);
+        }
+        100% {
+          transform: scale(1);
+          box-shadow: var(--shadow-sm);
+        }
+      }
+
+      .var-type-badge {
+        font-size: 9px;
+        font-weight: 700;
+        padding: 4px 8px;
+        border-radius: 999px;
+        text-transform: uppercase;
+        flex-shrink: 0;
+      }
+
+      .type-COLOR {
+        background: #7a0ff9;
+        color: #ffffff;
+      }
+      .type-FLOAT {
+        background: #ffc9c9;
+        color: #5c1e5b;
+      }
+      .type-STRING {
+        background: #cdf5e8;
+        color: #001276;
+      }
+      .type-BOOLEAN {
+        background: #c7237a;
+        color: #ffffff;
+      }
+      .type-UNKNOWN {
+        background: var(--surface2);
+        color: #515151;
+      }
+
+      .var-name {
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .var-from {
+        font-size: 10px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 110px;
+        flex-shrink: 0;
+      }
+      .var-error-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 7px;
+        border-radius: 999px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--red);
+        background: var(--red-dim);
+        flex-shrink: 0;
+      }
+
+      .mapped-indicator {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--border);
+        flex-shrink: 0;
+        transition: background 0.2s;
+      }
+
+      .var-card.mapped .mapped-indicator {
+        background: var(--green);
+      }
+
+      .var-card-body {
+        padding: 0 14px 12px;
+        border-top: 1px solid var(--border);
+        display: none;
+      }
+
+      .var-card.expanded .var-card-body {
+        display: block;
+      }
+      .var-inline-errors {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 14px;
+      }
+      .var-inline-error {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: var(--error-light-bg);
+        border: 1px solid rgba(185, 67, 67, 0.18);
+        color: var(--text);
+        font-size: 11px;
+        line-height: 1.45;
+      }
+      .var-inline-error svg {
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+
+      .var-meta {
+        padding: 10px 0 10px;
+        font-size: 10px;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 10px;
+        font-family: var(--font-mono);
+        word-break: break-all;
+      }
+
+      .map-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-top: 6px;
+      }
+
+      .select-wrap {
+        flex: 1;
+        position: relative;
+      }
+
+      select {
+        width: 100%;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 12px;
+        padding: 9px 12px;
+        appearance: none;
+        cursor: pointer;
+        outline: none;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s,
+          background 0.15s;
+      }
+
+      select:hover {
+        border-color: var(--border-accent);
+      }
+      select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-dim);
+      }
+
+      .select-arrow {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: none;
+        color: var(--text-muted);
+        font-size: 10px;
+      }
+
+      .sub-select {
+        margin-top: 6px;
+        animation: slideIn 0.15s ease;
+      }
+
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* ── Loading spinner ── */
+      .spinner {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ── Progress bar ── */
+      .progress-wrap {
+        padding: 10px 16px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .progress-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .progress-track {
+        height: 4px;
+        background: var(--surface2);
+        border-radius: 99px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 99px;
+        transition: width 0.3s ease;
+        width: 0%;
+      }
+
+      /* ── Broken variable card ── */
+      .var-card.broken {
+        border-color: var(--red-dim);
+        background: var(--error-light-bg);
+      }
+      .var-card.broken .var-name {
+        color: var(--red);
+      }
+      .var-card.broken .var-from {
+        color: var(--text-muted);
+      }
+      .type-BROKEN {
+        background: var(--red-dim);
+        color: var(--red);
+      }
+
+      /* ── Bulk remap panel ── */
+      .bulk-remap-panel {
+        background: var(--surface);
+        border: 0.5px solid var(--border);
+        border-radius: var(--radius);
+        padding: clamp(10px, 2.5vw, 14px);
+        margin-bottom: 2px;
+        box-shadow: var(--shadow-sm);
+        transition:
+          border-color 0.18s ease,
+          transform 0.18s ease,
+          box-shadow 0.18s ease;
+      }
+      .bulk-remap-panel:hover {
+        border-color: var(--border);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-lg);
+      }
+      .bulk-remap-header {
+        display: flex;
+        align-items: center;
+        justify-content: left;
+        gap: clamp(6px, 1.5vw, 10px);
+        cursor: pointer;
+        user-select: none;
+        margin-bottom: 0;
+        flex-wrap: wrap;
+      }
+      .bulk-remap-body.collapsed {
+        display: none;
+      }
+      .bulk-remap-row {
+        display: flex;
+        gap: clamp(6px, 1.8vw, 10px);
+        align-items: center;
+        margin-top: clamp(6px, 1.5vw, 8px);
+        flex-wrap: wrap;
+      }
+      .inline-note {
+        font-size: clamp(11px, 2.6vw, 12px);
+        line-height: 1.55;
+        color: var(--text-muted);
+      }
+      .toolbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .icon-no-pointer {
+        pointer-events: none;
+      }
+      .section-title-tight {
+        margin-bottom: 0;
+      }
+      .welcome-note {
+        margin-top: 6px;
+        font-size: 11px;
+        color: var(--text-dim);
+      }
+      .flex-spacer {
+        flex: 1;
+      }
+      .progress-panel {
+        display: none;
+        padding: 0 clamp(12px, 3vw, 16px) clamp(8px, 2vw, 10px);
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+      }
+      .progress-track-offset {
+        margin-top: 8px;
+      }
+      .progress-label-offset {
+        margin-top: 5px;
+      }
+      .spinner-compact {
+        width: 11px;
+        height: 11px;
+        border-width: 1.5px;
+      }
+      .bulk-remap-title {
+        margin-bottom: 0;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-family: var(--font-heading);
+        font-size: clamp(11px, 2.6vw, 12px);
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--text);
+      }
+      .bulk-arrow {
+        width: clamp(22px, 5vw, 26px);
+        height: clamp(22px, 5vw, 26px);
+        border-radius: 50%;
+        background: var(--accent);
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: clamp(11px, 2.6vw, 12px);
+        color: var(--info-light-bg);
+        flex-shrink: 0;
+      }
+      .bulk-remap-subtitle {
+        font-size: clamp(10px, 2.4vw, 11px);
+        color: var(--text-muted);
+        margin-left: 6px;
+      }
+      .bulk-remap-description {
+        font-size: clamp(10px, 2.4vw, 11px);
+        color: var(--text-muted);
+        margin-bottom: clamp(6px, 1.5vw, 8px);
+        line-height: 1.5;
+      }
+      .select-wrap-fill {
+        flex: 1;
+        min-width: 0;
+      }
+      .bulk-target-row {
+        display: none;
+        margin-top: clamp(4px, 1vw, 6px);
+      }
+      .bulk-status {
+        font-size: clamp(10px, 2.4vw, 11px);
+        color: var(--text-muted);
+        margin-top: clamp(4px, 1vw, 6px);
+        min-height: 18px;
+      }
+      .bulk-apply-btn {
+        margin-top: -4px;
+      }
+
+      /* ── Summary row ── */
+      .summary-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .stat-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 9px;
+        border-radius: 20px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .chip-total {
+        background: var(--surface2);
+        color: var(--text-muted);
+      }
+      .chip-mapped {
+        background: var(--green-dim);
+        color: var(--green);
+      }
+      .chip-unmapped {
+        background: var(--yellow-dim);
+        color: var(--yellow);
+      }
+      .chip-hidden {
+        background: var(--accent-dim);
+        color: var(--accent);
+      }
+      .chip-broken {
+        background: var(--red-dim);
+        color: var(--red);
+      }
+      .chip-live {
+        background: var(--accent-dim);
+        color: var(--accent);
+      }
+      .scan-live-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        box-shadow: var(--shadow-sm);
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .scan-live-note strong {
+        color: var(--text);
+      }
+      .scan-empty-state {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 18px;
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) + 2px);
+        background:
+          radial-gradient(
+            circle at top left,
+            rgba(0, 109, 227, 0.06),
+            transparent 38%
+          ),
+          var(--surface);
+        box-shadow: var(--shadow-sm);
+      }
+      .scan-empty-top {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .scan-empty-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        align-self: flex-start;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text-dim);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .scan-empty-title {
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: var(--text);
+        line-height: 1.15;
+      }
+      .scan-empty-copy {
+        font-size: 12px;
+        line-height: 1.55;
+        color: var(--text-muted);
+      }
+      .scan-empty-copy strong {
+        color: var(--text);
+      }
+      .scan-empty-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: var(--text-dim);
+      }
+      .scan-empty-hint {
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: var(--surface2);
+        border: 1px dashed var(--border);
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--text-muted);
+      }
+      .scan-skeleton-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .scan-skeleton-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface2);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+      }
+      .scan-skeleton-dot,
+      .scan-skeleton-line {
+        position: relative;
+        overflow: hidden;
+        background: rgba(0, 109, 227, 0.08);
+      }
+      .scan-skeleton-dot::after,
+      .scan-skeleton-line::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        transform: translateX(-100%);
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(255, 255, 255, 0.55),
+          transparent
+        );
+        animation: skeletonSweep 1.4s ease-in-out infinite;
+      }
+      [data-theme="dark"] .scan-skeleton-dot::after,
+      [data-theme="dark"] .scan-skeleton-line::after {
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(255, 255, 255, 0.12),
+          transparent
+        );
+      }
+      .scan-skeleton-dot {
+        width: 34px;
+        height: 18px;
+        border-radius: 999px;
+        flex-shrink: 0;
+      }
+      .scan-skeleton-content {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+      }
+      .scan-skeleton-line {
+        height: 11px;
+        border-radius: 999px;
+      }
+      .scan-skeleton-line.primary {
+        width: 62%;
+      }
+      .scan-skeleton-line.secondary {
+        width: 28%;
+      }
+      .scan-skeleton-line.tertiary {
+        width: 18%;
+      }
+
+      @keyframes skeletonSweep {
+        to {
+          transform: translateX(100%);
+        }
+      }
+      .var-card.new-discovery {
+        animation: streamIn 0.24s ease;
+      }
+
+      @keyframes streamIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* ── Result panel ── */
+      .result-panel {
+        border-radius: 8px;
+        padding: 12px 14px;
+        border-width: 2px;
+        border-style: solid;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1.5;
+        box-shadow: var(--shadow-sm);
+      }
+
+      .result-panel.result-success {
+        background: var(--success-light-bg);
+        border-color: var(--green);
+        color: var(--text);
+      }
+      .result-panel.result-warn {
+        background: var(--warning-light-bg);
+        border-color: var(--yellow);
+        color: var(--text);
+      }
+      .result-panel.result-info {
+        background: var(--info-light-bg);
+        border-color: var(--info);
+        color: var(--text);
+      }
+
+      .result-title {
+        font-weight: 700;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+      .result-errors {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(0, 0, 0, 0.08);
+      }
+      .result-errors .section-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .error-item {
+        font-size: 11px;
+        color: var(--red);
+        margin-top: 4px;
+        font-family: var(--font-mono);
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .result-subtext {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+      .result-warning-title {
+        margin-top: 8px;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /* ── Filter bar ── */
+      .filter-bar {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .search-input {
+        flex: 1;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 12px;
+        padding: 10px 12px;
+        outline: none;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+      }
+
+      .search-input::placeholder {
+        color: var(--text-dim);
+      }
+      .search-input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-dim);
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      /* ── Layer count badge & layer list (Tokens Studio-style) ── */
+      .var-card-header {
+        padding: 12px 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .layer-actions {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-shrink: 0;
+        margin-left: auto;
+      }
+
+      .layer-count-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        background: var(--surface2);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+
+      .layer-count-btn:hover,
+      .layer-count-btn.active {
+        background: var(--accent-dim);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .navigate-btn {
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.15s;
+        flex-shrink: 0;
+        padding: 0;
+      }
+
+      .navigate-btn svg,
+      .layer-row-nav svg {
+        pointer-events: none;
+      }
+
+      .navigate-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-dim);
+      }
+
+      /* Layer list panel (slides open below the header) */
+      .layer-list-panel {
+        display: none;
+        flex-direction: column;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .layer-list-panel.open {
+        display: flex;
+      }
+
+      .layer-list-inner {
+        max-height: 140px;
+        overflow-y: auto;
+        padding: 4px 6px;
+      }
+
+      .layer-list-inner::-webkit-scrollbar {
+        width: 3px;
+      }
+      .layer-list-inner::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 2px;
+      }
+
+      .layer-list-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px 4px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .layer-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        font-size: 11px;
+        cursor: default;
+        border: 0.5px solid var(--border);
+        background: var(--surface2);
+        box-shadow: var(--shadow-sm);
+        transition:
+          border-color 0.15s ease,
+          background 0.15s ease,
+          transform 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+
+      .layer-row:hover {
+        background: var(--surface2);
+        border-color: var(--accent);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-lg);
+      }
+
+      /* Hidden layer rows — dimmed with strikethrough name */
+      .layer-row.is-hidden {
+        opacity: 0.72;
+        background: linear-gradient(
+          180deg,
+          rgba(127, 132, 141, 0.08),
+          rgba(127, 132, 141, 0.04)
+        );
+      }
+      .layer-row.is-hidden .layer-row-name {
+        text-decoration: line-through;
+      }
+
+      .layer-row-hidden-icon {
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+        color: var(--text-dim);
+      }
+
+      .layer-row-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 8px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        flex-shrink: 0;
+        color: var(--text-dim);
+      }
+
+      .layer-row-name {
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .layer-row-page {
+        font-size: 10px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        flex-shrink: 0;
+        max-width: 130px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        padding: 5px 8px;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+      }
+
+      .layer-row-nav {
+        width: 28px;
+        height: 28px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text-dim);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 0;
+        transition:
+          border-color 0.12s,
+          color 0.12s,
+          background 0.12s;
+        pointer-events: auto;
+      }
+
+      .layer-row {
+        cursor: pointer;
+      }
+      .layer-row:hover .layer-row-nav {
+        color: var(--accent);
+        border-color: rgba(0, 109, 227, 0.22);
+        background: var(--accent-dim);
+      }
+
+      /* Ensure SVG children never steal clicks */
+      .layer-row svg,
+      .layer-row svg * {
+        pointer-events: none;
+      }
+      .navigate-btn svg,
+      .navigate-btn svg * {
+        pointer-events: none;
+      }
+      .layer-count-btn svg,
+      .layer-count-btn svg * {
+        pointer-events: none;
+      }
+      .usages-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.637);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        z-index: 50;
+      }
+      .usages-modal-overlay.open {
+        display: flex;
+      }
+      .usages-modal {
+        width: min(680px, 100%);
+        max-height: min(720px, calc(100vh - 36px));
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        box-shadow: var(--shadow-lg);
+        overflow: hidden;
+      }
+      .usages-modal-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .usages-modal-title {
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: var(--text);
+      }
+      .usages-modal-subtitle {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+      .usages-modal-close {
+        width: 30px;
+        height: 30px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+      }
+      .usages-modal-close:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-dim);
+      }
+      .usages-modal-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+      }
+      .usages-filter {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: var(--text-muted);
+        font-weight: 600;
+      }
+      .usages-filter input {
+        accent-color: var(--accent);
+      }
+      .usages-modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        background:
+          linear-gradient(180deg, rgba(0, 109, 227, 0.03), transparent 22%),
+          var(--surface);
+      }
+      .usages-modal-empty {
+        padding: 18px 10px;
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+      .usages-modal-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      /* ── Per-node mapping panel ── */
+      .node-map-panel {
+        display: none;
+        margin-top: 8px;
+        padding: 12px;
+        background: linear-gradient(
+          180deg,
+          rgba(0, 109, 227, 0.03),
+          transparent
+        );
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .node-map-panel.open {
+        display: flex;
+      }
+
+      .node-map-panel .select-wrap {
+        margin-top: 0;
+      }
+
+      .node-map-panel select {
+        font-size: 11px;
+        padding: 4px 8px;
+      }
+
+      .node-map-panel .sub-select {
+        margin-top: 4px;
+        animation: none;
+      }
+
+      .node-map-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--border-accent);
+        flex-shrink: 0;
+        transition: background 0.2s;
+        margin-left: 2px;
+        box-shadow: 0 0 0 4px rgba(0, 109, 227, 0.05);
+      }
+
+      .node-mapped .node-map-indicator {
+        background: #09821f;
+      }
+
+      .layer-row-expand {
+        width: 28px;
+        height: 28px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text-dim);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 0;
+        transition: all 0.15s;
+        pointer-events: all;
+      }
+
+      .layer-row-expand:hover {
+        border-color: var(--accent);
+        color: var(--accent-hover);
+      }
+      .layer-row.expanded .layer-row-expand {
+        background: var(--accent-dim);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .layer-item {
+        display: flex;
+        flex-direction: column;
+      }
+      .layer-item + .layer-item {
+        margin-top: 2px;
+      }
+
+      /* ── Grouped Variable Picker ── */
+      .var-picker {
+        position: relative;
+      }
+
+      .var-picker-trigger {
+        width: 100%;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        font-size: 12px;
+        padding: 7px 28px 7px 10px;
+        cursor: pointer;
+        text-align: left;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font);
+      }
+
+      .var-picker-trigger:hover {
+        border-color: var(--border-accent);
+      }
+
+      .var-picker-trigger.open {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-dim);
+        border-radius: var(--radius) var(--radius) var(--radius-sm)
+          var(--radius-sm);
+      }
+
+      .var-picker-trigger-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .var-picker-trigger-arrow {
+        position: absolute;
+        right: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: none;
+        color: var(--text-dim);
+        font-size: 9px;
+        transition: color 0.15s;
+      }
+
+      .var-picker-trigger.open .var-picker-trigger-arrow {
+        color: var(--accent);
+      }
+
+      .var-picker-dropdown {
+        position: fixed;
+        z-index: 9999;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow:
+          var(--shadow-lg),
+          0 0 0 1px rgba(54, 150, 252, 0.08);
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        min-width: 220px;
+        max-width: 380px;
+      }
+
+      .var-picker-dropdown.open {
+        display: flex;
+      }
+
+      .var-picker-search-wrap {
+        padding: 7px 7px 6px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        background: var(--surface);
+      }
+
+      .var-picker-search {
+        width: 100%;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 12px;
+        padding: 5px 9px;
+        outline: none;
+        font-family: var(--font);
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+      }
+
+      .var-picker-search:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-dim);
+      }
+
+      .var-picker-search::placeholder {
+        color: var(--text-dim);
+      }
+
+      .var-picker-list {
+        overflow-y: auto;
+        max-height: 260px;
+        padding: 4px 5px;
+      }
+
+      .var-picker-list::-webkit-scrollbar {
+        width: 4px;
+      }
+      .var-picker-list::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 999px;
+      }
+
+      .var-picker-blank {
+        padding: 6px 8px;
+        font-size: 12px;
+        color: var(--text-dim);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: var(--radius-sm);
+        margin-bottom: 3px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 9px;
+        margin-bottom: 4px;
+        transition: background 0.1s;
+      }
+
+      .var-picker-blank:hover {
+        background: var(--surface2);
+      }
+
+      .var-picker-blank.selected {
+        color: var(--accent);
+      }
+
+      /* Group header row */
+      .var-picker-group-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 8px 4px;
+        cursor: pointer;
+        user-select: none;
+        border-radius: var(--radius-sm);
+        transition: background 0.1s;
+        margin: 1px 0;
+      }
+
+      .var-picker-group-header:hover {
+        background: var(--surface2);
+      }
+
+      .var-picker-group-chevron {
+        font-size: 9px;
+        color: var(--text-dim);
+        width: 10px;
+        flex-shrink: 0;
+        transition: color 0.1s;
+      }
+
+      .var-picker-group-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        letter-spacing: 0.01em;
+      }
+
+      .var-picker-group-count {
+        font-size: 10px;
+        color: var(--text-dim);
+        background: var(--surface2);
+        border-radius: 999px;
+        padding: 1px 6px;
+        flex-shrink: 0;
+      }
+
+      /* Indent nested groups */
+      .var-picker-group-header[data-depth="1"] {
+        padding-left: 18px;
+      }
+      .var-picker-group-header[data-depth="2"] {
+        padding-left: 28px;
+      }
+
+      /* Item row */
+      .var-picker-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 5px 8px 5px 12px;
+        font-size: 12px;
+        color: var(--text);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.1s;
+        white-space: nowrap;
+        margin: 1px 0;
+      }
+
+      .var-picker-item[data-depth="1"] {
+        padding-left: 22px;
+      }
+      .var-picker-item[data-depth="2"] {
+        padding-left: 32px;
+      }
+
+      .var-picker-item:hover {
+        background: var(--surface2);
+      }
+
+      .var-picker-item.selected {
+        background: var(--accent-dim);
+        color: var(--accent);
+      }
+
+      .var-picker-item-check {
+        width: 12px;
+        flex-shrink: 0;
+        font-size: 10px;
+        color: var(--accent);
+        opacity: 0;
+      }
+
+      .var-picker-item.selected .var-picker-item-check {
+        opacity: 1;
+      }
+
+      .var-picker-item-name {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .var-picker-empty {
+        padding: 16px 12px;
+        font-size: 12px;
+        color: var(--text-dim);
+        text-align: center;
+      }
+
+      .var-picker-group-body.collapsed {
+        display: none;
+      }
+
+      /* Node picker uses smaller text */
+      .node-map-panel .var-picker-trigger {
+        font-size: 11px;
+        padding: 4px 22px 4px 8px;
+        border-radius: var(--radius-sm);
+      }
+
+      .node-map-panel .var-picker-trigger.open {
+        border-radius: var(--radius-sm) var(--radius-sm) 3px 3px;
+      }
+
+      /* ── Resize handle ── */
+      #resize-handle {
+        position: fixed;
+        bottom: 0;
+        right: 0;
+        width: 16px;
+        height: 16px;
+        cursor: se-resize;
+        z-index: 100;
+        opacity: 0.4;
+        transition: opacity 0.15s;
+      }
+      #resize-handle:hover {
+        opacity: 1;
+      }
+      #resize-handle svg {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div class="header-top">
+          <h1>
+            <span class="logo-wrap">
+              <svg
+                width="204"
+                height="51"
+                viewBox="0 0 204 51"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path d="M0 0H29.8663V50.5312H0V0Z" fill="#1A2142" />
+                <path
+                  d="M39.529 10.1877C39.529 15.8143 34.9407 20.3755 29.2808 20.3755C23.6209 20.3755 19.0326 15.8143 19.0326 10.1877C19.0326 4.56121 23.6209 0 29.2808 0C34.9407 0 39.529 4.56121 39.529 10.1877Z"
+                  fill="#00AEEF"
+                />
+                <path
+                  d="M45.2676 35.4534C45.2676 43.7807 38.4769 50.5312 30.1002 50.5312C21.7235 50.5312 14.9329 43.7807 14.9329 35.4534C14.9329 27.1261 21.7235 20.3755 30.1002 20.3755C38.4769 20.3755 45.2676 27.1261 45.2676 35.4534Z"
+                  fill="#006DE3"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M191.12 29.4313V22.7404H188.323V18.4689H191.12V12.6475L196.564 12.6475V18.4689H201.138V22.7404H196.564V29.7337C196.564 30.5905 196.728 31.2584 197.055 31.7372C197.408 32.1908 197.95 32.4176 198.681 32.4176C199.235 32.4176 199.714 32.3294 200.117 32.153C200.52 31.9514 200.898 31.7246 201.251 31.4726L203.444 34.7991C201.755 36.16 199.89 36.8404 197.849 36.8404C196.161 36.8404 194.825 36.5254 193.842 35.8953C192.859 35.2653 192.154 34.3959 191.725 33.287C191.322 32.1782 191.12 30.893 191.12 29.4313Z"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M169.743 36.1977V18.4689H174.959L175.111 20.3967C175.69 19.6911 176.459 19.1241 177.416 18.6957C178.374 18.2672 179.357 18.053 180.365 18.053C182.381 18.053 183.994 18.6579 185.204 19.8675C186.413 21.0772 187.018 22.8664 187.018 25.2353V36.1977H181.575V25.9913C181.575 25.0085 181.323 24.2273 180.819 23.6477C180.34 23.068 179.659 22.7782 178.777 22.7782C177.593 22.7782 176.686 23.1688 176.056 23.9501C175.451 24.7313 175.148 25.6385 175.148 26.6718V36.1977H169.743Z"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M161.056 15.8605V10.9841L166.877 10.9841V15.8605H161.056ZM161.245 36.1977V18.4688H166.688V36.1977H161.245Z"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M147.387 36.1977V18.4689H152.604L152.793 20.6992C153.246 20.0943 153.864 19.5147 154.645 18.9603C155.452 18.4059 156.485 18.1287 157.745 18.1287C158.224 18.1287 158.627 18.1539 158.954 18.2043C159.307 18.2547 159.648 18.3429 159.975 18.4689L159.106 23.2697C158.551 23.0933 157.896 23.005 157.14 23.005C155.855 23.005 154.809 23.3957 154.003 24.1769C153.221 24.9329 152.831 26.0166 152.831 27.4278V36.1977H147.387Z"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M127 43.758V18.4689H132.216C132.267 18.7965 132.305 19.1241 132.33 19.4517C132.355 19.7541 132.38 20.0691 132.405 20.3967C132.985 19.6659 133.728 19.1115 134.636 18.7335C135.543 18.3303 136.488 18.1287 137.471 18.1287C139.21 18.1287 140.659 18.5571 141.818 19.4139C142.977 20.2707 143.847 21.3922 144.426 22.7782C145.006 24.1643 145.296 25.6385 145.296 27.201C145.296 28.8391 145.018 30.2629 144.464 31.4726C143.935 32.6822 143.217 33.6776 142.309 34.4589C141.402 35.2401 140.407 35.8197 139.323 36.1977C138.239 36.5758 137.143 36.7648 136.034 36.7648C135.177 36.7648 134.472 36.6892 133.917 36.538C133.363 36.3868 132.859 36.2355 132.405 36.0843V43.758H127ZM132.405 26.7852V31.5104C133.136 31.9892 134.182 32.2286 135.543 32.2286C136.878 32.2286 137.924 31.775 138.68 30.8677C139.462 29.9605 139.852 28.7761 139.852 27.3144C139.852 26.5332 139.726 25.8024 139.474 25.1219C139.247 24.4163 138.857 23.8493 138.302 23.4209C137.773 22.9924 137.055 22.7782 136.148 22.7782C134.938 22.7782 134.006 23.1941 133.35 24.0257C132.72 24.8573 132.405 25.7772 132.405 26.7852Z"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M122.42 30.8298L124.65 34.2697C124.398 34.4461 123.944 34.7359 123.289 35.1391C122.659 35.5424 121.815 35.9204 120.757 36.2732C119.698 36.626 118.4 36.8024 116.863 36.8024C114.847 36.8024 113.108 36.3992 111.646 35.5928C110.185 34.7863 109.063 33.6649 108.282 32.2284C107.501 30.792 107.11 29.1413 107.11 27.2764C107.11 25.6132 107.463 24.0633 108.169 22.6269C108.899 21.1904 109.945 20.0438 111.306 19.1869C112.692 18.3049 114.343 17.8639 116.258 17.8639C118.173 17.8639 119.774 18.3049 121.059 19.1869C122.369 20.0438 123.352 21.2408 124.007 22.7781C124.688 24.2901 125.028 26.0416 125.028 28.0325V28.9397L112.402 28.9397C112.428 29.8721 112.856 30.7038 113.688 31.4346C114.519 32.1654 115.641 32.5308 117.052 32.5308C118.463 32.5308 119.61 32.3292 120.492 31.926C121.374 31.4976 122.017 31.1322 122.42 30.8298ZM112.402 25.462H119.887C119.887 24.958 119.748 24.4539 119.471 23.9499C119.219 23.4207 118.816 22.9797 118.262 22.6269C117.732 22.2741 117.052 22.0977 116.22 22.0977C115.389 22.0977 114.683 22.2741 114.103 22.6269C113.549 22.9797 113.121 23.4207 112.818 23.9499C112.541 24.4539 112.402 24.958 112.402 25.462Z"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M87.773 29.4691V18.4689H93.2164V28.6753C93.2164 29.6834 93.4559 30.4772 93.9347 31.0568C94.4387 31.6364 95.1695 31.9262 96.1272 31.9262C97.236 31.9262 98.0928 31.5356 98.6977 30.7544C99.3025 29.948 99.6049 29.0407 99.6049 28.0327V18.4689H105.01V36.1978H99.7939L99.6427 34.3077C99.0631 34.9882 98.2944 35.5552 97.3368 36.0088C96.4044 36.4372 95.4215 36.6514 94.3883 36.6514C92.3722 36.6514 90.7594 36.0466 89.5497 34.837C88.3653 33.6273 87.773 31.838 87.773 29.4691Z"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M79.5323 36.1977V10.9841H84.9757V36.1977H79.5323Z"
+                />
+                <path
+                  class="logo-text-path"
+                  d="M57.9002 36.1977L57.9002 10.9841L67.3506 10.9841C69.4423 10.9841 71.1055 11.2991 72.3404 11.9292C73.6004 12.534 74.5077 13.3404 75.0621 14.3485C75.6165 15.3313 75.8937 16.4023 75.8937 17.5616C75.8937 18.62 75.6543 19.5273 75.1755 20.2833C74.7219 21.0393 74.1926 21.6315 73.5878 22.06C73.0082 22.4632 72.5168 22.7152 72.1136 22.816C72.3152 22.8664 72.542 22.942 72.794 23.0428C73.0712 23.1436 73.3484 23.257 73.6256 23.383C74.6589 23.8366 75.5157 24.5422 76.1961 25.4999C76.8765 26.4575 77.2168 27.6168 77.2168 28.9776C77.2168 31.5733 76.3221 33.4256 74.5329 34.5344C72.7688 35.6433 70.3747 36.1977 67.3506 36.1977H57.9002ZM63.457 21.0771H66.8214C67.6782 21.0771 68.4594 20.8755 69.1651 20.4723C69.8959 20.0439 70.2613 19.3004 70.2613 18.242C70.2613 17.486 70.0849 16.9064 69.7321 16.5031C69.4045 16.0999 68.976 15.8227 68.4468 15.6715C67.9176 15.4951 67.3758 15.4069 66.8214 15.4069L63.457 15.4069V21.0771ZM63.457 31.8127H67.1616C67.716 31.8127 68.3208 31.7497 68.976 31.6237C69.6565 31.4725 70.2361 31.1701 70.7149 30.7165C71.1937 30.2377 71.4331 29.5068 71.4331 28.524C71.4331 27.6168 71.1937 26.9237 70.7149 26.4449C70.2613 25.9661 69.6943 25.6511 69.0138 25.4999C68.3586 25.3235 67.7412 25.2353 67.1616 25.2353H63.457V31.8127Z"
+                />
+              </svg>
+            </span>
+            <span class="header-divider"></span>
+            <span class="header-subtitle">Variable Mapper</span>
+          </h1>
+          <div class="toolbar-actions">
+            <div class="theme-switcher" id="themeSwitcher">
+              <button class="theme-opt" data-mode="light" title="Light mode">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  class="icon-no-pointer"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="4"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  />
+                  <path
+                    d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+              <button class="theme-opt" data-mode="auto" title="Auto (system)">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  class="icon-no-pointer"
+                >
+                  <path
+                    d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+              <button class="theme-opt" data-mode="dark" title="Dark mode">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  class="icon-no-pointer"
+                >
+                  <path
+                    d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            <button
+              class="btn btn-ghost btn-sm"
+              id="resetBtn"
+              style="display: none"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+        <div class="scope-row">
+          <span class="scope-label">Scope:</span>
+          <button class="scope-btn active" data-scope="selection">
+            Selection
+          </button>
+          <button class="scope-btn" data-scope="page">Current Page</button>
+          <button class="scope-btn" data-scope="file">Whole File</button>
+        </div>
+      </header>
+
+      <main id="main">
+        <div class="welcome" id="welcome">
+          <!-- Hero band -->
+          <div class="welcome-hero">
+            <div class="welcome-hero-glow"></div>
+            <div class="welcome-hero-icon-wrap">
+              <svg
+                width="44"
+                height="37"
+                viewBox="0 0 44 37"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M0 26.307L22 16.6449L44 26.307L22 36.0437L0 26.307Z"
+                  fill="#7A0FF9"
+                  style="
+                    fill: #7a0ff9;
+                    fill: color(display-p3 0.4784 0.0588 0.9765);
+                    fill-opacity: 1;
+                  "
+                />
+                <path
+                  d="M0 20.7587L22 11.0966L44 20.7587L22 30.4954L0 20.7587Z"
+                  fill="#E1C0E2"
+                  style="
+                    fill: #e1c0e2;
+                    fill: color(display-p3 0.8824 0.7529 0.8863);
+                    fill-opacity: 1;
+                  "
+                />
+                <path
+                  d="M0 15.2104L22 5.5483L44 15.2104L22 24.9471L0 15.2104Z"
+                  fill="#00AEEF"
+                  style="
+                    fill: #00aeef;
+                    fill: color(display-p3 0 0.6824 0.9373);
+                    fill-opacity: 1;
+                  "
+                />
+                <path
+                  d="M0 9.6621L22 0L44 9.6621L22 19.3988L0 9.6621Z"
+                  fill="#0076B6"
+                  style="
+                    fill: #0076b6;
+                    fill: color(display-p3 0 0.4627 0.7137);
+                    fill-opacity: 1;
+                  "
+                />
+              </svg>
+            </div>
+            <div class="welcome-hero-text">
+              <div class="welcome-hero-eyebrow">Variable Mapper</div>
+              <h2 class="welcome-hero-title">Map variables with confidence</h2>
+              <p class="welcome-hero-body">
+                Scan your file, auto-match by name, and remap variables across
+                libraries in seconds.
+              </p>
+            </div>
+          </div>
+
+          <!-- Steps -->
+          <div class="welcome-steps">
+            <div class="welcome-step">
+              <div class="welcome-step-track">
+                <span class="welcome-step-num">1</span>
+                <span class="welcome-step-line"></span>
+              </div>
+              <div class="welcome-step-content">
+                <span class="welcome-step-text">Scan your scope</span>
+                <span class="welcome-step-desc"
+                  >Discovers every bound variable — selection, page, or whole
+                  file</span
+                >
+              </div>
+            </div>
+            <div class="welcome-step">
+              <div class="welcome-step-track">
+                <span class="welcome-step-num">2</span>
+                <span class="welcome-step-line"></span>
+              </div>
+              <div class="welcome-step-content">
+                <span class="welcome-step-text">Bulk-remap by library</span>
+                <span class="welcome-step-desc"
+                  >Auto-match by variable name, then fine-tune individual
+                  overrides</span
+                >
+              </div>
+            </div>
+            <div class="welcome-step">
+              <div class="welcome-step-track">
+                <span class="welcome-step-num">3</span>
+              </div>
+              <div class="welcome-step-content">
+                <span class="welcome-step-text">Apply &amp; review</span>
+                <span class="welcome-step-desc"
+                  >Commit changes, inspect any warnings, and re-scan to
+                  confirm</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <!-- Tip -->
+          <div class="welcome-tip">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              style="flex-shrink: 0; margin-top: 1px"
+            >
+              <path
+                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 15v-4m0-4h.01"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span
+              ><strong>Pro tip:</strong> Use <em>Bulk Remap by Library</em> to
+              pre-map all variables at once — then just fine-tune any outliers
+              below.</span
+            >
+          </div>
+
+          <!-- CTA -->
+          <div class="welcome-cta">
+            <button class="btn btn-primary btn-full" id="welcomeScanBtn">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                style="pointer-events: none"
+              >
+                <circle
+                  cx="11"
+                  cy="11"
+                  r="7"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  d="M21 21l-4-4"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              Scan Now
+            </button>
+          </div>
+
+          <!-- Capability pills -->
+          <div class="welcome-caps">
+            <span class="welcome-cap type-COLOR">Color</span>
+            <span class="welcome-cap type-FLOAT">Float</span>
+            <span class="welcome-cap type-STRING">String</span>
+            <span class="welcome-cap type-BOOLEAN">Boolean</span>
+            <span class="welcome-cap-sep">·</span>
+            <span class="welcome-cap-label">All variable types supported</span>
+          </div>
+        </div>
+      </main>
+
+      <footer>
+        <div class="flex-spacer"></div>
+        <button class="btn btn-secondary" id="scanBtn">Scan</button>
+        <button
+          class="btn btn-primary"
+          id="rebindBtn"
+          disabled
+          style="display: none"
+        >
+          Apply Remapping
+        </button>
+      </footer>
+      <div id="progressBar" class="progress-panel">
+        <div class="progress-track progress-track-offset">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-label progress-label-offset">
+          <span class="spinner spinner-compact"></span
+          ><span id="progressMsg">Working…</span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ── State ────────────────────────────────────────────────────────────────────
+      let state = {
+        scope: "selection",
+        themeMode: "auto",
+        scanned: false,
+        emptyMessage: "",
+        filterQuery: "",
+        variables: [],
+        libraryCollections: [],
+        libraryVariableCache: {},
+        libraryVariableTypeCache: {},
+        pendingLibraryRequests: {},
+        pickerDataCache: new WeakMap(),
+        pendingSubSelects: {},
+        recentCollectionKeys: [],
+        mappings: {},
+        nodeMappings: {},
+        nodesByVariable: {},
+        nodeSummaryByVariable: {},
+        pendingVariableNodes: {},
+        boundIdToKey: {},
+        boundIdToName: {},
+        boundIdToCollectionKey: {},
+        variableKeyToCollectionKey: {},
+        idRemap: {}, // segmentId → canonicalId (same variable, different Figma internal IDs)
+        variableGroups: {},
+        sourceLibraries: [],
+        sourceVariablesByCollectionId: {},
+        nodeSummaryByVariableId: {},
+        brokenVariableCount: 0,
+        nonBrokenVariableCount: 0,
+        stats: null,
+        loading: false,
+        renderToken: 0,
+        mappingVersion: 0,
+        mappingSummaryCache: null,
+        banner: null,
+        variableErrorsById: {},
+        recentlyUpdatedVariableIds: {},
+        justMappedVariableIds: {},
+        scanInProgress: false,
+        applyInProgress: false,
+        scanStatus: null,
+        renderContext: null,
+      };
+
+      // ── DOM Refs ─────────────────────────────────────────────────────────────────
+      const mainEl = document.getElementById("main");
+      const scanBtn = document.getElementById("scanBtn");
+      const rebindBtn = document.getElementById("rebindBtn");
+      const resetBtn = document.getElementById("resetBtn");
+      const progressBar = document.getElementById("progressBar");
+      const progressFill = document.getElementById("progressFill");
+      const progressMsg = document.getElementById("progressMsg");
+      const welcomeScanBtn = document.getElementById("welcomeScanBtn");
+
+      const welcome = document.getElementById("welcome");
+      const scopeButtons = Array.from(document.querySelectorAll(".scope-btn"));
+      const themeButtons = Array.from(document.querySelectorAll(".theme-opt"));
+      let groupRenderObserver = null;
+      let groupChunkObserver = null;
+      let recentUpdateResetTimer = null;
+      let justMappedResetTimer = null;
+      let usagesModalRef = null;
+
+      function persistPreferences(partial) {
+        parent.postMessage(
+          { pluginMessage: { type: "save-preferences", preferences: partial } },
+          "*",
+        );
+      }
+
+      function applyScope(scope, persist = true) {
+        const nextScope =
+          scope === "page" || scope === "file" ? scope : "selection";
+        state.scope = nextScope;
+        scopeButtons.forEach((btn) =>
+          btn.classList.toggle("active", btn.dataset.scope === nextScope),
+        );
+        if (persist) persistPreferences({ scope: nextScope });
+      }
+
+      function applyThemeMode(mode, persist = true) {
+        const root = document.documentElement;
+        const nextMode = mode === "light" || mode === "dark" ? mode : "auto";
+        state.themeMode = nextMode;
+
+        if (nextMode === "auto") {
+          delete root.dataset.theme;
+        } else {
+          root.dataset.theme = nextMode;
+        }
+
+        themeButtons.forEach((btn) =>
+          btn.classList.toggle("active", btn.dataset.mode === nextMode),
+        );
+        if (persist) persistPreferences({ themeMode: nextMode });
+      }
+
+      function toLookupSet(ids) {
+        const lookup = {};
+        (ids || []).forEach((id) => {
+          if (id) lookup[id] = true;
+        });
+        return lookup;
+      }
+
+      function clearVariableErrors(variableIds) {
+        let changed = false;
+        (variableIds || []).forEach((variableId) => {
+          if (state.variableErrorsById[variableId]) {
+            delete state.variableErrorsById[variableId];
+            const card = document.querySelector(
+              '.var-card[data-safevarid="' + safeId(variableId) + '"]',
+            );
+            if (card) {
+              card.classList.remove("has-errors");
+              const badge = card.querySelector(".var-error-badge");
+              if (badge) badge.remove();
+              const inlineErrors = card.querySelector(".var-inline-errors");
+              if (inlineErrors) inlineErrors.remove();
+            }
+            changed = true;
+          }
+        });
+        return changed;
+      }
+
+      function flashVariableFeedback(variableIds, opts = {}) {
+        const ids = Array.from(new Set((variableIds || []).filter(Boolean)));
+        if (ids.length === 0) return;
+
+        if (opts.highlight !== false) {
+          state.recentlyUpdatedVariableIds = toLookupSet(ids);
+          if (recentUpdateResetTimer) clearTimeout(recentUpdateResetTimer);
+          recentUpdateResetTimer = setTimeout(() => {
+            state.recentlyUpdatedVariableIds = {};
+            ids.forEach((variableId) => {
+              const card = document.querySelector(
+                '.var-card[data-safevarid="' + safeId(variableId) + '"]',
+              );
+              if (card) card.classList.remove("recent-update");
+            });
+          }, 2200);
+        }
+
+        if (opts.animateMapped) {
+          state.justMappedVariableIds = toLookupSet(ids);
+          if (justMappedResetTimer) clearTimeout(justMappedResetTimer);
+          justMappedResetTimer = setTimeout(() => {
+            state.justMappedVariableIds = {};
+            ids.forEach((variableId) => {
+              const card = document.querySelector(
+                '.var-card[data-safevarid="' + safeId(variableId) + '"]',
+              );
+              if (card) card.classList.remove("just-mapped");
+            });
+          }, 700);
+        }
+      }
+
+      function normalizeRecentCollectionKeys(keys) {
+        if (!Array.isArray(keys)) return [];
+        return keys
+          .filter((key) => typeof key === "string" && key.trim().length > 0)
+          .slice(0, 8);
+      }
+
+      function getVariableLeafName(name) {
+        const parts = String(name || "").split("/");
+        return (parts[parts.length - 1] || "").trim();
+      }
+
+      function getVariableSourceLabel(variable) {
+        if (!variable) return "";
+        if (variable.libraryName && variable.libraryName !== "This file") {
+          return `${variable.libraryName} / ${variable.collectionName}`;
+        }
+        return variable.collectionName || "";
+      }
+
+      function normalizeVariableRecord(variable) {
+        if (!variable) return variable;
+        const pathSegments = String(variable.name || "")
+          .split("/")
+          .map((segment) => segment.trim());
+        const leafName = pathSegments[pathSegments.length - 1] || "";
+        return Object.assign({}, variable, {
+          _leafName: leafName,
+          _pathSegments: pathSegments,
+          _lowerName: String(variable.name || "").toLowerCase(),
+          _safeId: safeId(variable.id),
+          _searchText:
+            `${variable.name || ""} ${variable.collectionName || ""}`.toLowerCase(),
+          _sourceLabel: getVariableSourceLabel(variable),
+          _typeBucket: variable.broken
+            ? "BROKEN"
+            : variable.resolvedType || "UNKNOWN",
+        });
+      }
+
+      function normalizeVariableRecords(variables) {
+        return Array.isArray(variables)
+          ? variables.map(normalizeVariableRecord)
+          : [];
+      }
+
+      function rememberRecentCollection(collectionKey) {
+        if (!collectionKey) return;
+        state.recentCollectionKeys = [
+          collectionKey,
+          ...state.recentCollectionKeys.filter((key) => key !== collectionKey),
+        ].slice(0, 8);
+        persistPreferences({
+          recentCollectionKeys: state.recentCollectionKeys,
+        });
+      }
+
+      function getOrderedLibraryCollections() {
+        if (!state.libraryCollections.length) return [];
+        const cacheKey = state.recentCollectionKeys.join("|");
+        if (
+          state._orderedCollectionsCache &&
+          state._orderedCollectionsSource === state.libraryCollections &&
+          state._orderedCollectionsKey === cacheKey
+        ) {
+          return state._orderedCollectionsCache;
+        }
+        const rank = new Map(
+          state.recentCollectionKeys.map((key, index) => [key, index]),
+        );
+        const ordered = [...state.libraryCollections].sort((a, b) => {
+          const aRank = rank.has(a.key)
+            ? rank.get(a.key)
+            : Number.MAX_SAFE_INTEGER;
+          const bRank = rank.has(b.key)
+            ? rank.get(b.key)
+            : Number.MAX_SAFE_INTEGER;
+          if (aRank !== bRank) return aRank - bRank;
+          return `${a.libraryName || ""}${a.name}`.localeCompare(
+            `${b.libraryName || ""}${b.name}`,
+          );
+        });
+        state._orderedCollectionsSource = state.libraryCollections;
+        state._orderedCollectionsKey = cacheKey;
+        state._orderedCollectionsCache = ordered;
+        return ordered;
+      }
+
+      function queuePendingSubSelect(collectionKey, element, renderFn) {
+        if (!collectionKey || !element || typeof renderFn !== "function")
+          return;
+        if (!state.pendingSubSelects[collectionKey]) {
+          state.pendingSubSelects[collectionKey] = [];
+        }
+        state.pendingSubSelects[collectionKey].push({
+          element,
+          render: renderFn,
+        });
+      }
+
+      function requestVariableNodes(variableId, callback) {
+        if (!variableId || typeof callback !== "function") return;
+        if (state.nodesByVariable[variableId]) {
+          callback(state.nodesByVariable[variableId]);
+          return;
+        }
+        if (!state.pendingVariableNodes[variableId]) {
+          state.pendingVariableNodes[variableId] = [];
+          parent.postMessage(
+            {
+              pluginMessage: {
+                type: "get-variable-nodes",
+                variableId,
+              },
+            },
+            "*",
+          );
+        }
+        state.pendingVariableNodes[variableId].push(callback);
+      }
+
+      function disconnectGroupRenderObserver() {
+        if (groupRenderObserver) {
+          groupRenderObserver.disconnect();
+          groupRenderObserver = null;
+        }
+        if (groupChunkObserver) {
+          groupChunkObserver.disconnect();
+          groupChunkObserver = null;
+        }
+      }
+
+      function requestLibraryVariables(collectionKey, isLocal, localId) {
+        if (!collectionKey || state.libraryVariableCache[collectionKey]) return;
+        if (state.pendingLibraryRequests[collectionKey]) return;
+        state.pendingLibraryRequests[collectionKey] = true;
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "get-library-variables",
+              collectionKey,
+              isLocal: !!isLocal,
+              localId: localId || null,
+            },
+          },
+          "*",
+        );
+      }
+
+      function bumpMappingVersion() {
+        state.mappingVersion += 1;
+        state.mappingSummaryCache = null;
+      }
+
+      function createEmptyVariableGroups() {
+        return {
+          BROKEN: [],
+          COLOR: [],
+          FLOAT: [],
+          STRING: [],
+          BOOLEAN: [],
+          UNKNOWN: [],
+        };
+      }
+
+      function resetScanData() {
+        state.emptyMessage = "";
+        state.variables = [];
+        state.libraryCollections = [];
+        state._orderedCollectionsCache = null;
+        state._orderedCollectionsSource = null;
+        state._orderedCollectionsKey = "";
+        state.libraryVariableCache = {};
+        state.libraryVariableTypeCache = {};
+        state.pendingLibraryRequests = {};
+        state.pendingVariableNodes = {};
+        state.pendingSubSelects = {};
+        state.nodesByVariable = {};
+        state.nodeSummaryByVariable = {};
+        state.boundIdToKey = {};
+        state.boundIdToName = {};
+        state.boundIdToCollectionKey = {};
+        state.variableKeyToCollectionKey = {};
+        state.idRemap = {};
+        state.variableGroups = createEmptyVariableGroups();
+        state.sourceLibraries = [];
+        state.sourceVariablesByCollectionId = {};
+        state.nodeSummaryByVariableId = {};
+        state.nodeMappings = {};
+        state.brokenVariableCount = 0;
+        state.nonBrokenVariableCount = 0;
+        state.stats = null;
+        state.renderContext = null;
+        state.mappingSummaryCache = null;
+        if (usagesModalRef) {
+          usagesModalRef.classList.remove("open");
+          usagesModalRef._nodes = null;
+        }
+      }
+
+      function updateCachesForVariable(variable) {
+        const type = variable._typeBucket || "UNKNOWN";
+        if (!state.variableGroups[type]) state.variableGroups[type] = [];
+        state.variableGroups[type].push(variable);
+
+        const summary = state.nodeSummaryByVariable[variable.id];
+        if (summary) {
+          state.nodeSummaryByVariableId[variable.id] = {
+            nodeCount: summary && typeof summary.c === "number" ? summary.c : 0,
+            hiddenCount:
+              summary && typeof summary.h === "number" ? summary.h : 0,
+            hasInstances: !!(summary && summary.i),
+          };
+        }
+
+        if (variable.broken) {
+          state.brokenVariableCount += 1;
+          return;
+        }
+
+        state.nonBrokenVariableCount += 1;
+        const sourceKey =
+          variable.collectionId ||
+          (variable.libraryName || "") + "\x00" + variable.collectionName;
+        if (!state.sourceVariablesByCollectionId[sourceKey]) {
+          state.sourceVariablesByCollectionId[sourceKey] = [];
+          state.sourceLibraries.push({
+            key: sourceKey,
+            label:
+              variable.libraryName === "This file"
+                ? "This file — " + variable.collectionName
+                : variable.libraryName
+                  ? variable.libraryName + " — " + variable.collectionName
+                  : variable.collectionName,
+            collectionId: variable.collectionId,
+            libraryName: variable.libraryName,
+            collectionName: variable.collectionName,
+          });
+        }
+        state.sourceVariablesByCollectionId[sourceKey].push(variable);
+      }
+
+      function mergeScannedVariables(variables, nodeSummaryByVariable, stats) {
+        const normalizedVariables = normalizeVariableRecords(variables || []);
+        const appendedVariables = [];
+        const seenIds = new Set(state.variables.map((variable) => variable.id));
+
+        Object.assign(state.nodeSummaryByVariable, nodeSummaryByVariable || {});
+
+        normalizedVariables.forEach((variable) => {
+          if (!variable || seenIds.has(variable.id)) return;
+          seenIds.add(variable.id);
+          state.variables.push(variable);
+          updateCachesForVariable(variable);
+          appendedVariables.push(variable);
+        });
+
+        if (stats) {
+          state.stats = Object.assign({}, state.stats || {}, stats);
+        }
+
+        return appendedVariables;
+      }
+
+      function rebuildScanCaches() {
+        const TYPE_ORDER = [
+          "BROKEN",
+          "COLOR",
+          "FLOAT",
+          "STRING",
+          "BOOLEAN",
+          "UNKNOWN",
+        ];
+        const groups = {};
+        TYPE_ORDER.forEach((type) => {
+          groups[type] = [];
+        });
+
+        const sourceLibs = [];
+        const sourceVariablesByCollectionId = {};
+        const nodeSummaryByVariableId = {};
+        const seenLibs = new Set();
+        let brokenCount = 0;
+        let nonBrokenCount = 0;
+
+        Object.entries(state.nodeSummaryByVariable || {}).forEach(
+          ([variableId, summary]) => {
+            nodeSummaryByVariableId[variableId] = {
+              nodeCount:
+                summary && typeof summary.c === "number" ? summary.c : 0,
+              hiddenCount:
+                summary && typeof summary.h === "number" ? summary.h : 0,
+              hasInstances: !!(summary && summary.i),
+            };
+          },
+        );
+
+        state.variables.forEach((variable) => {
+          const type = variable._typeBucket;
+          if (!groups[type]) groups[type] = [];
+          groups[type].push(variable);
+
+          if (variable.broken) {
+            brokenCount += 1;
+            return;
+          }
+
+          nonBrokenCount += 1;
+          const sourceKey =
+            variable.collectionId ||
+            (variable.libraryName || "") + "\x00" + variable.collectionName;
+          if (!sourceVariablesByCollectionId[sourceKey]) {
+            sourceVariablesByCollectionId[sourceKey] = [];
+          }
+          sourceVariablesByCollectionId[sourceKey].push(variable);
+
+          if (!seenLibs.has(sourceKey)) {
+            seenLibs.add(sourceKey);
+            sourceLibs.push({
+              key: sourceKey,
+              label:
+                variable.libraryName === "This file"
+                  ? "This file — " + variable.collectionName
+                  : variable.libraryName
+                    ? variable.libraryName + " — " + variable.collectionName
+                    : variable.collectionName,
+              collectionId: variable.collectionId,
+              libraryName: variable.libraryName,
+              collectionName: variable.collectionName,
+            });
+          }
+        });
+
+        state.variableGroups = groups;
+        state.sourceLibraries = sourceLibs;
+        state.sourceVariablesByCollectionId = sourceVariablesByCollectionId;
+        state.nodeSummaryByVariableId = nodeSummaryByVariableId;
+        state.brokenVariableCount = brokenCount;
+        state.nonBrokenVariableCount = nonBrokenCount;
+      }
+
+      function getMappingSummary() {
+        if (
+          state.mappingSummaryCache &&
+          state.mappingSummaryCache.version === state.mappingVersion
+        ) {
+          return state.mappingSummaryCache;
+        }
+
+        const mappedVariableIds = new Set();
+        let nodeMappedCount = 0;
+
+        Object.entries(state.mappings).forEach(([variableId, mapping]) => {
+          if (mapping && mapping.variableKey) {
+            mappedVariableIds.add(variableId);
+          }
+        });
+
+        Object.values(state.nodeMappings).forEach((mapping) => {
+          if (mapping && mapping.variableKey) {
+            nodeMappedCount += 1;
+            if (mapping.fromVariableId) {
+              mappedVariableIds.add(mapping.fromVariableId);
+            }
+          }
+        });
+
+        state.mappingSummaryCache = {
+          version: state.mappingVersion,
+          mappedVariableIds,
+          mappedVariableCount: mappedVariableIds.size,
+          nodeMappedCount,
+        };
+        return state.mappingSummaryCache;
+      }
+
+      // ── Theme switcher (Auto / Light / Dark) ─────────────────────────────────────
+      (function () {
+        const sysDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+        // Follow system only when in auto mode
+        sysDark.addEventListener("change", () => {
+          if (state.themeMode === "auto") applyThemeMode("auto", false);
+        });
+
+        themeButtons.forEach((btn) => {
+          btn.addEventListener("click", () => applyThemeMode(btn.dataset.mode));
+        });
+
+        // Init to auto
+        applyThemeMode("auto", false);
+      })();
+
+      // ── Scope buttons ────────────────────────────────────────────────────────────
+      scopeButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          applyScope(btn.dataset.scope);
+        });
+      });
+
+      // ── Scan ─────────────────────────────────────────────────────────────────────
+      function startScan() {
+        if (state.scanInProgress || state.applyInProgress) return;
+        state.scanInProgress = true;
+        state.banner = null;
+        resetScanData();
+        state.variableErrorsById = {};
+        state.recentlyUpdatedVariableIds = {};
+        state.justMappedVariableIds = {};
+        state.mappings = {};
+        state.nodeMappings = {};
+        state.scanned = true;
+        state.mappingVersion += 1;
+        state.mappingSummaryCache = null;
+        if (usagesModalRef) {
+          usagesModalRef.classList.remove("open");
+          usagesModalRef._nodes = null;
+        }
+        state.scanStatus = {
+          message: "Scanning…",
+          pct: 0,
+          totalNodes: 0,
+          variableCount: 0,
+          discoveredCount: 0,
+        };
+        setLoading(true, "Scanning…");
+        showProgress("Initialising…", 0);
+        renderMain();
+        rebindBtn.style.display = "inline-flex";
+        resetBtn.style.display = "inline-flex";
+        scanBtn.style.display = "none";
+        updateRebindBtn();
+        parent.postMessage(
+          { pluginMessage: { type: "scan", scope: state.scope } },
+          "*",
+        );
+      }
+
+      scanBtn.addEventListener("click", startScan);
+      if (welcomeScanBtn) {
+        welcomeScanBtn.addEventListener("click", startScan);
+      }
+
+      // ── Reset ────────────────────────────────────────────────────────────────────
+      resetBtn.addEventListener("click", () => {
+        // Cancel any running scan
+        parent.postMessage({ pluginMessage: { type: "cancel-scan" } }, "*");
+        state.scanned = false;
+        state.scanInProgress = false;
+        state.applyInProgress = false;
+        state.scanStatus = null;
+        state.banner = null;
+        resetScanData();
+        state._orderedCollectionsCache = null;
+        state._orderedCollectionsSource = null;
+        state._orderedCollectionsKey = "";
+        state.mappings = {};
+        state.nodeMappings = {};
+        state.variableErrorsById = {};
+        state.recentlyUpdatedVariableIds = {};
+        state.justMappedVariableIds = {};
+        bumpMappingVersion();
+        renderMain();
+        rebindBtn.style.display = "none";
+        rebindBtn.disabled = true;
+        resetBtn.style.display = "none";
+        scanBtn.style.display = "inline-block";
+        scanBtn.disabled = false;
+      });
+
+      // ── Rebind ───────────────────────────────────────────────────────────────────
+      rebindBtn.addEventListener("click", () => {
+        if (state.applyInProgress) return;
+
+        const mappings = Object.entries(state.mappings)
+          .filter(([, m]) => m && m.variableKey)
+          .map(([fromId, m]) => ({
+            fromId,
+            fromKey: m.fromVariableKey || null,
+            fromCollectionKey: m.collectionKey || null,
+            toKey: m.variableKey,
+            isLocal: m.variableIsLocal || false,
+            localId: m.variableLocalId || null,
+          }));
+
+        const nodeMappings = {};
+        for (const [key, m] of Object.entries(state.nodeMappings)) {
+          if (m && m.variableKey && m.nodeId) {
+            // key format: nodeId|fromVariableId
+            nodeMappings[m.nodeId + "|" + m.fromVariableId] = {
+              nodeId: m.nodeId,
+              fromVariableId: m.fromVariableId,
+              fromVariableKey: m.fromVariableKey || null,
+              sourceCollectionKey: m.sourceCollectionKey || null,
+              collectionKey: m.collectionKey || null,
+              toKey: m.variableKey,
+              isLocal: m.variableIsLocal || false,
+              localId: m.variableLocalId || null,
+            };
+          }
+        }
+
+        if (mappings.length === 0 && Object.keys(nodeMappings).length === 0) {
+          showBanner(
+            "No mappings configured. Choose target variables first.",
+            "warn",
+          );
+          return;
+        }
+
+        const dryRun = false;
+
+        state.applyInProgress = true;
+        state.banner = null;
+        setLoading(true, "Applying…");
+        showProgress("Starting remapping…", 0);
+        rebindBtn.disabled = true;
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "rebind",
+              mappings,
+              nodeMappings,
+              scope: state.scope,
+              dryRun,
+              includeHidden: true,
+            },
+          },
+          "*",
+        );
+      });
+
+      // ── Message handler ───────────────────────────────────────────────────────────
+      window.onmessage = (event) => {
+        const msg = event.data.pluginMessage;
+        if (!msg) return;
+
+        // Progress-only messages — don't reset loading state
+        if (msg.type === "scan-progress" || msg.type === "rebind-progress") {
+          if (msg.type === "scan-progress") {
+            state.scanStatus = Object.assign({}, state.scanStatus || {}, {
+              message: msg.message,
+              pct: msg.pct,
+              scannedNodes: msg.scannedNodes,
+              totalNodes: msg.totalNodes,
+            });
+            if (state.variables.length === 0 && state.scanInProgress) {
+              renderMain();
+            } else {
+              updateSummary();
+            }
+          }
+          showProgress(msg.message, msg.pct);
+          return;
+        }
+
+        if (msg.type === "preferences-loaded") {
+          const prefs = msg.preferences || {};
+          state.recentCollectionKeys = normalizeRecentCollectionKeys(
+            prefs.recentCollectionKeys,
+          );
+          applyScope(prefs.scope, false);
+          applyThemeMode(prefs.themeMode, false);
+          return;
+        }
+
+        if (msg.type === "scan-start") {
+          state.scanned = true;
+          state.scanInProgress = true;
+          state.banner = null;
+          state.nodeMappings = {};
+          state.mappingSummaryCache = null;
+          if (usagesModalRef) {
+            usagesModalRef.classList.remove("open");
+            usagesModalRef._nodes = null;
+          }
+          state.scanStatus = Object.assign(
+            {},
+            state.scanStatus || {},
+            {
+              message: "Scanning…",
+              pct: 0,
+            },
+            msg.stats || {},
+          );
+          state.libraryCollections = msg.libraryCollections || [];
+          renderMain();
+          updateRebindBtn();
+          return;
+        }
+
+        if (msg.type === "scan-chunk") {
+          const appendedVariables = mergeScannedVariables(
+            msg.variables,
+            msg.nodeSummaryByVariable,
+            msg.stats,
+          );
+          state.scanStatus = Object.assign(
+            {},
+            state.scanStatus || {},
+            msg.stats || {},
+          );
+          if (!state.renderContext) {
+            renderMain();
+          } else if (appendedVariables.length > 0) {
+            appendVariablesToRenderedList(appendedVariables);
+            updateSummary();
+            updateRebindBtn();
+          } else {
+            updateSummary();
+          }
+          return;
+        }
+
+        if (msg.type === "scan-complete") {
+          setLoading(false);
+          hideProgress();
+          state.scanInProgress = false;
+          state.scanStatus = null;
+          state.emptyMessage = msg.message || "";
+          state.libraryCollections =
+            msg.libraryCollections || state.libraryCollections;
+          state.boundIdToKey = msg.boundIdToKey || {};
+          state.boundIdToName = msg.boundIdToName || {};
+          state.boundIdToCollectionKey = msg.boundIdToCollectionKey || {};
+          state.variableKeyToCollectionKey =
+            msg.variableKeyToCollectionKey || {};
+          state.idRemap = msg.idRemap || {};
+          state.stats = msg.stats || state.stats;
+          state.nodeMappings = {};
+          if (usagesModalRef) {
+            usagesModalRef.classList.remove("open");
+            usagesModalRef._nodes = null;
+          }
+          renderMain();
+          rebindBtn.style.display = "inline-flex";
+          resetBtn.style.display = "inline-flex";
+          scanBtn.style.display = "inline-block";
+          scanBtn.disabled = false;
+          updateRebindBtn();
+          return;
+        }
+
+        if (msg.type === "rebind-result") {
+          setLoading(false);
+          hideProgress();
+          state.applyInProgress = false;
+        }
+
+        if (msg.type === "scan-result") {
+          setLoading(false);
+          hideProgress();
+          state.scanInProgress = false;
+          state.applyInProgress = false;
+          state.scanStatus = null;
+          if (msg.error) {
+            showBanner(msg.error, "error");
+            return;
+          }
+          if (msg.message) {
+            state.scanned = true;
+            state.banner = null;
+            state.emptyMessage = msg.message;
+            renderMain();
+            return;
+          }
+          resetScanData();
+          state.variables = normalizeVariableRecords(msg.variables || []);
+          state.banner = null;
+          state.emptyMessage = msg.message || "";
+          state.libraryCollections = msg.libraryCollections || [];
+          state.nodesByVariable = {};
+          state.nodeSummaryByVariable = msg.nodeSummaryByVariable || {};
+          state.boundIdToKey = msg.boundIdToKey || {};
+          state.boundIdToName = msg.boundIdToName || {};
+          state.boundIdToCollectionKey = msg.boundIdToCollectionKey || {};
+          state.variableKeyToCollectionKey =
+            msg.variableKeyToCollectionKey || {};
+          state.idRemap = msg.idRemap || {};
+          state.stats = msg.stats || null;
+          state.scanned = true;
+          state.mappings = {};
+          state.nodeMappings = {};
+          state.mappingVersion += 1;
+          state.mappingSummaryCache = null;
+          state.variableErrorsById = {};
+          state.recentlyUpdatedVariableIds = {};
+          state.justMappedVariableIds = {};
+          state.pendingLibraryRequests = {};
+          state.pendingVariableNodes = {};
+          state.pendingSubSelects = {};
+          if (usagesModalRef) {
+            usagesModalRef.classList.remove("open");
+            usagesModalRef._nodes = null;
+          }
+          rebuildScanCaches();
+          bumpMappingVersion();
+
+          renderMain();
+          rebindBtn.style.display = "inline-flex";
+          resetBtn.style.display = "inline-flex";
+          updateRebindBtn();
+        }
+
+        if (msg.type === "library-variables-result") {
+          delete state.pendingLibraryRequests[msg.collectionKey];
+          if (msg.error) {
+            showBanner(
+              "Could not load library variables: " + msg.error,
+              "error",
+            );
+            return;
+          }
+          state.libraryVariableCache[msg.collectionKey] =
+            normalizeVariableRecords(msg.variables);
+          delete state.libraryVariableTypeCache[msg.collectionKey];
+          renderSubSelectForCollection(msg.collectionKey);
+          const bulkPanel = window._bulkPanelRef;
+          if (
+            bulkPanel &&
+            bulkPanel.isConnected &&
+            bulkPanel._bulkPendingKey === msg.collectionKey &&
+            bulkPanel._bulkPopulate
+          ) {
+            bulkPanel._bulkPopulate(
+              state.libraryVariableCache[msg.collectionKey],
+            );
+            bulkPanel._bulkPendingKey = null;
+            bulkPanel._bulkPopulate = null;
+          }
+        }
+
+        if (msg.type === "variable-nodes-result") {
+          if (msg.error) {
+            showBanner("Could not load layer usage: " + msg.error, "error");
+            return;
+          }
+          const nodes = Array.isArray(msg.nodes) ? msg.nodes : [];
+          state.nodesByVariable[msg.variableId] = nodes;
+          const pending = state.pendingVariableNodes[msg.variableId] || [];
+          delete state.pendingVariableNodes[msg.variableId];
+          pending.forEach((callback) => {
+            try {
+              callback(nodes);
+            } catch (err) {
+              console.warn("variable-nodes callback failed:", String(err));
+            }
+          });
+        }
+
+        if (msg.type === "rebind-result") {
+          if (msg.error) {
+            showBanner("Rebind error: " + msg.error, "error");
+            return;
+          }
+          state.variableErrorsById = msg.variableErrorsById || {};
+          const updatedVariableIds = Array.isArray(msg.updatedVariableIds)
+            ? msg.updatedVariableIds
+            : [];
+          if (updatedVariableIds.length > 0) {
+            flashVariableFeedback(updatedVariableIds, {
+              animateMapped: false,
+              highlight: true,
+            });
+          }
+          if ((msg.updatedVariableCount || 0) > 0) {
+            showBanner(
+              `${msg.updatedVariableCount} variable${msg.updatedVariableCount !== 1 ? "s" : ""} updated`,
+              "success",
+            );
+          } else if (msg.errors && msg.errors.length > 0) {
+            showBanner("Some variables could not be updated", "warn");
+          } else {
+            showBanner("No variables updated", "warn");
+          }
+          updateRebindBtn();
+        }
+      };
+
+      // ── Render ────────────────────────────────────────────────────────────────────
+      function appendVariablesToRenderedList(variables) {
+        const renderContext = state.renderContext;
+        if (
+          !renderContext ||
+          !Array.isArray(variables) ||
+          variables.length === 0
+        ) {
+          return;
+        }
+        variables.forEach((variable) => {
+          const groupEntry = renderContext.groupEntries[variable._typeBucket];
+          if (!groupEntry) return;
+          if (groupEntry.container) groupEntry.container.style.display = "";
+          if (groupEntry.countEl) {
+            groupEntry.countEl.textContent = String(
+              groupEntry.variables.length,
+            );
+          }
+          groupEntry.queueRender(true);
+        });
+      }
+
+      function formatCount(value) {
+        const num = Number(value) || 0;
+        return num.toLocaleString();
+      }
+
+      function buildScanningEmptyState() {
+        const scanStatus = state.scanStatus || {};
+        const scannedNodes = scanStatus.scannedNodes || 0;
+        const totalNodes = scanStatus.totalNodes || 0;
+        const wrapper = document.createElement("div");
+        wrapper.className = "scan-empty-state";
+        const extraHint =
+          scannedNodes > 10000 && state.variables.length === 0
+            ? '<div class="scan-empty-hint">This file may not contain variables, or they may appear later in the scan.</div>'
+            : "";
+        wrapper.innerHTML = `
+          <div class="scan-empty-top">
+            <div class="scan-empty-status"><span class="spinner spinner-compact"></span><span>Scanning in progress</span></div>
+            <div class="scan-empty-meta"><span>${formatCount(scannedNodes)} node${scannedNodes !== 1 ? "s" : ""} scanned${totalNodes > 0 ? ` of ${formatCount(totalNodes)}` : ""}</span></div>
+            <div class="scan-empty-title">No variables found yet — still scanning remaining nodes</div>
+            <div class="scan-empty-copy"><strong>Variables will appear here</strong> as soon as they are discovered.</div>
+          </div>
+          ${extraHint}
+          <div class="scan-skeleton-list">
+            <div class="scan-skeleton-row">
+              <div class="scan-skeleton-dot"></div>
+              <div class="scan-skeleton-content">
+                <div class="scan-skeleton-line primary"></div>
+                <div class="scan-skeleton-line secondary"></div>
+                <div class="scan-skeleton-line tertiary"></div>
+              </div>
+            </div>
+            <div class="scan-skeleton-row">
+              <div class="scan-skeleton-dot"></div>
+              <div class="scan-skeleton-content">
+                <div class="scan-skeleton-line primary"></div>
+                <div class="scan-skeleton-line secondary"></div>
+                <div class="scan-skeleton-line tertiary"></div>
+              </div>
+            </div>
+            <div class="scan-skeleton-row">
+              <div class="scan-skeleton-dot"></div>
+              <div class="scan-skeleton-content">
+                <div class="scan-skeleton-line primary"></div>
+                <div class="scan-skeleton-line secondary"></div>
+                <div class="scan-skeleton-line tertiary"></div>
+              </div>
+            </div>
+          </div>
+        `;
+        return wrapper;
+      }
+
+      function buildFinalEmptyState() {
+        const wrapper = document.createElement("div");
+        wrapper.className = "welcome";
+        wrapper.innerHTML = `
+          <div class="welcome-hero">
+            <div class="welcome-hero-glow"></div>
+            <div class="welcome-hero-icon-wrap" style="background:var(--surface2);border-color:var(--border);color:var(--text-dim)">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+                <path d="M21 21l-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                <path d="M8 11h6M11 8v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="welcome-hero-text">
+              <div class="welcome-hero-eyebrow" style="color:var(--text-dim)">Scan complete</div>
+              <h2 class="welcome-hero-title">No bound variables found</h2>
+              <p class="welcome-hero-body">${escHtml(state.emptyMessage || "Try a broader scope — switch to Current Page or Whole File and scan again.")}</p>
+            </div>
+          </div>
+          <div class="welcome-empty-hints">
+            <div class="welcome-empty-hint">
+              <span class="welcome-empty-hint-icon">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v5m0 3h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              Variables must be bound using Figma's variable panel — style references alone are not detected.
+            </div>
+            <div class="welcome-empty-hint">
+              <span class="welcome-empty-hint-icon">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              Try selecting a component or frame that uses library variables, then scan Selection.
+            </div>
+          </div>
+        `;
+        return wrapper;
+      }
+
+      function renderMain() {
+        disconnectGroupRenderObserver();
+        mainEl.innerHTML = "";
+        state.filterIndex = [];
+        state.renderContext = null;
+        state.renderToken += 1;
+        const renderToken = state.renderToken;
+
+        if (!state.scanned) {
+          mainEl.appendChild(welcome);
+          return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        if (state.banner && state.banner.text) {
+          const banner = document.createElement("div");
+          const icon = STATUS_ICONS[state.banner.type] || STATUS_ICONS.info;
+          banner.className = `banner banner-${state.banner.type || "info"}`;
+          banner.innerHTML =
+            icon + " <span>" + escHtml(state.banner.text) + "</span>";
+          fragment.appendChild(banner);
+        }
+
+        if (state.variables.length === 0 && state.scanInProgress) {
+          fragment.appendChild(buildScanningEmptyState());
+          mainEl.appendChild(fragment);
+          return;
+        }
+
+        if (state.variables.length === 0 && !state.scanInProgress) {
+          fragment.appendChild(buildFinalEmptyState());
+          mainEl.appendChild(fragment);
+          return;
+        }
+
+        // Summary chips
+        const totalCount = state.variables.length;
+        const mappingSummary = getMappingSummary();
+        const mappedCount = mappingSummary.mappedVariableCount;
+        const nodeMappedCount = mappingSummary.nodeMappedCount;
+        const brokenCount = state.brokenVariableCount || 0;
+        const hiddenLayerTotal = state.stats ? state.stats.hiddenLayerCount : 0;
+
+        const summaryDiv = document.createElement("div");
+        summaryDiv.className = "summary-row";
+        summaryDiv.innerHTML = `
+    <span class="stat-chip chip-total">${LINK_ICON} ${totalCount} variable${totalCount !== 1 ? "s" : ""} found</span>
+    ${state.scanInProgress ? `<span class="stat-chip chip-live"><span class="spinner spinner-compact"></span> Scanning…</span>` : ""}
+    ${mappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${mappedCount} variable${mappedCount !== 1 ? "s" : ""} ready</span>` : ""}
+    ${nodeMappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${nodeMappedCount} layer override${nodeMappedCount !== 1 ? "s" : ""}</span>` : ""}
+    ${hiddenLayerTotal > 0 ? `<span class="stat-chip chip-hidden" title="Hidden layers are included in scan and remapping">${EYE_OFF_ICON} ${hiddenLayerTotal} hidden layer${hiddenLayerTotal !== 1 ? "s" : ""}</span>` : ""}
+    ${brokenCount > 0 ? `<span class="stat-chip chip-broken" title="Variables that could not be resolved — source library may be missing">${brokenCount} broken</span>` : ""}
+  `;
+        fragment.appendChild(summaryDiv);
+
+        if (state.scanInProgress) {
+          const liveNote = document.createElement("div");
+          const scanStatus = state.scanStatus || {};
+          const liveTotalNodes = scanStatus.totalNodes || 0;
+          const liveResolved = scanStatus.resolvedVariableCount || totalCount;
+          const liveDiscovered = scanStatus.discoveredCount || totalCount;
+          liveNote.className = "scan-live-note";
+          liveNote.innerHTML = `<span class="spinner spinner-compact"></span><span><strong>Scanning…</strong> ${totalCount} variable${totalCount !== 1 ? "s are" : " is"} ready so far${liveTotalNodes > 0 ? ` across ${liveTotalNodes} node${liveTotalNodes !== 1 ? "s" : ""}` : ""}. ${liveResolved > 0 ? `${liveResolved} of ${liveDiscovered} variable reference${liveDiscovered !== 1 ? "s" : ""} resolved.` : "Results will appear here as they are discovered."} You can start mapping now; apply unlocks when the scan finishes.</span>`;
+          fragment.appendChild(liveNote);
+        }
+
+        // Filter bar
+        const filterDiv = document.createElement("div");
+        filterDiv.className = "filter-bar";
+        filterDiv.innerHTML = `<input class="search-input" id="searchInput" placeholder="Filter variables…" />`;
+        fragment.appendChild(filterDiv);
+
+        // Bulk remap panel
+        if (
+          state.nonBrokenVariableCount > 0 &&
+          state.libraryCollections.length > 0
+        ) {
+          fragment.appendChild(buildBulkRemapPanel());
+        }
+
+        // Section header
+        const sectionTitle = document.createElement("div");
+        sectionTitle.className = "section-title";
+        sectionTitle.textContent = "Found Variables";
+        fragment.appendChild(sectionTitle);
+
+        // Group variables by resolvedType — broken get their own group
+        const TYPE_ORDER = [
+          "BROKEN",
+          "COLOR",
+          "FLOAT",
+          "STRING",
+          "BOOLEAN",
+          "UNKNOWN",
+        ];
+        const TYPE_LABELS = {
+          BROKEN: "Broken / Unresolved",
+          COLOR: "Color",
+          FLOAT: "Float",
+          STRING: "String",
+          BOOLEAN: "Boolean",
+          UNKNOWN: "Unknown",
+        };
+        const groups = state.variableGroups || {};
+
+        const listDiv = document.createElement("div");
+        listDiv.className = "var-list";
+        listDiv.id = "varList";
+        const filterIndex = [];
+        const orderedCollections = getOrderedLibraryCollections();
+        const collectionIndexByKey = {};
+        orderedCollections.forEach((collection, index) => {
+          collectionIndexByKey[collection.key] = index;
+        });
+        const libraryOptionsMarkup = orderedCollections
+          .map(
+            (c, i) =>
+              `<option value="${i}">${escHtml(c.libraryName)} → ${escHtml(c.name)}</option>`,
+          )
+          .join("");
+        const nodeLibraryOptionsMarkup =
+          '<option value="">— override: choose library —</option>' +
+          libraryOptionsMarkup;
+        let filterFrame = null;
+        const pendingGroups = [];
+        let renderScheduled = false;
+
+        const queueGroupRender = (groupEntry, forceFull) => {
+          if (
+            !groupEntry ||
+            groupEntry.renderedCount >= groupEntry.variables.length
+          ) {
+            return;
+          }
+          if (forceFull) groupEntry.renderAll = true;
+          if (groupEntry.queued) return;
+          groupEntry.queued = true;
+          pendingGroups.push(groupEntry);
+          if (!renderScheduled) {
+            renderScheduled = true;
+            requestAnimationFrame(flushGroupRenderQueue);
+          }
+        };
+
+        const renderGroupCards = (groupEntry, limit) => {
+          if (
+            !groupEntry ||
+            groupEntry.renderedCount >= groupEntry.variables.length
+          ) {
+            return 0;
+          }
+          const end = Math.min(limit, groupEntry.variables.length);
+          if (end <= groupEntry.renderedCount) return 0;
+          const startCount = groupEntry.renderedCount;
+
+          const fragment = document.createDocumentFragment();
+          for (; groupEntry.renderedCount < end; groupEntry.renderedCount++) {
+            const variable = groupEntry.variables[groupEntry.renderedCount];
+            const card = buildVarCard(
+              variable,
+              orderedCollections,
+              collectionIndexByKey,
+              libraryOptionsMarkup,
+              nodeLibraryOptionsMarkup,
+            );
+            if (state.scanInProgress) {
+              card.classList.add("new-discovery");
+              setTimeout(() => card.classList.remove("new-discovery"), 280);
+            }
+            groupEntry.cards.push(card);
+            fragment.appendChild(card);
+          }
+          groupEntry.body.appendChild(fragment);
+          if (groupEntry.sentinel) {
+            groupEntry.body.appendChild(groupEntry.sentinel);
+            if (
+              groupChunkObserver &&
+              groupEntry.renderedCount < groupEntry.variables.length
+            ) {
+              groupChunkObserver.observe(groupEntry.sentinel);
+            } else if (groupChunkObserver) {
+              groupChunkObserver.unobserve(groupEntry.sentinel);
+            }
+          }
+          return groupEntry.renderedCount - startCount;
+        };
+
+        const flushGroupRenderQueue = () => {
+          renderScheduled = false;
+          if (renderToken !== state.renderToken) return;
+
+          let renderedThisFrame = 0;
+          while (pendingGroups.length > 0 && renderedThisFrame < 24) {
+            const groupEntry = pendingGroups.shift();
+            groupEntry.queued = false;
+            if (groupEntry.renderedCount >= groupEntry.variables.length)
+              continue;
+
+            const remainingBudget = 24 - renderedThisFrame;
+            const targetCount = groupEntry.renderAll
+              ? groupEntry.renderedCount + remainingBudget
+              : groupEntry.renderedCount + Math.min(12, remainingBudget);
+            const previousCount = groupEntry.renderedCount;
+            renderGroupCards(groupEntry, targetCount);
+            renderedThisFrame += groupEntry.renderedCount - previousCount;
+
+            if (
+              groupEntry.renderedCount < groupEntry.variables.length &&
+              groupEntry.renderAll
+            ) {
+              queueGroupRender(groupEntry, groupEntry.renderAll);
+            }
+          }
+
+          if (state.filterQuery) {
+            applyVariableFilter(state.filterQuery);
+          }
+          if (pendingGroups.length > 0 && !renderScheduled) {
+            renderScheduled = true;
+            requestAnimationFrame(flushGroupRenderQueue);
+          }
+        };
+
+        const groupEntriesByType = {};
+
+        for (const type of TYPE_ORDER) {
+          const vars = groups[type] || [];
+
+          const groupHeader = document.createElement("div");
+          groupHeader.className = "var-group-header";
+          groupHeader.dataset.type = type;
+          groupHeader.innerHTML =
+            '<span class="var-group-chevron">▾</span>' +
+            '<span class="var-type-badge type-' +
+            type +
+            '" style="font-size:9px">' +
+            TYPE_LABELS[type] +
+            "</span>" +
+            '<span class="var-group-count">' +
+            vars.length +
+            "</span>";
+
+          const groupBody = document.createElement("div");
+          groupBody.className = "var-group-body";
+          groupBody.dataset.type = type;
+          const groupContainer = document.createElement("div");
+          groupContainer.className = "var-group";
+          if (vars.length === 0) groupContainer.style.display = "none";
+          const chevron = groupHeader.querySelector(".var-group-chevron");
+          const countEl = groupHeader.querySelector(".var-group-count");
+          const groupEntry = {
+            header: groupHeader,
+            body: groupBody,
+            container: groupContainer,
+            countEl,
+            cards: [],
+            variables: vars,
+            chevron,
+            renderedCount: 0,
+            queued: false,
+            renderAll: false,
+            sentinel: null,
+          };
+          groupEntry.queueRender = (forceFull) =>
+            queueGroupRender(groupEntry, !!forceFull);
+          groupEntry.sentinel = document.createElement("div");
+          groupEntry.sentinel.className = "var-group-sentinel";
+          groupEntry.sentinel.style.height = "1px";
+          groupEntry.sentinel.style.pointerEvents = "none";
+          groupEntry.sentinel._groupEntry = groupEntry;
+
+          filterIndex.push(groupEntry);
+          groupEntriesByType[type] = groupEntry;
+
+          groupHeader.addEventListener("click", () => {
+            const collapsed = groupBody.classList.toggle("collapsed");
+            if (chevron) chevron.textContent = collapsed ? "▸" : "▾";
+          });
+
+          groupContainer.appendChild(groupHeader);
+          groupContainer.appendChild(groupBody);
+          listDiv.appendChild(groupContainer);
+        }
+
+        fragment.appendChild(listDiv);
+        mainEl.appendChild(fragment);
+        state.filterIndex = filterIndex;
+        const searchInput = document.getElementById("searchInput");
+        if (searchInput) searchInput.value = state.filterQuery || "";
+
+        // Search filter
+        if (searchInput) {
+          searchInput.addEventListener("input", (e) => {
+            state.filterQuery = e.target.value.toLowerCase();
+            if (filterFrame) cancelAnimationFrame(filterFrame);
+            filterFrame = requestAnimationFrame(() => {
+              applyVariableFilter(state.filterQuery);
+              filterFrame = null;
+            });
+          });
+        }
+
+        if (window.IntersectionObserver) {
+          groupChunkObserver = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                if (!entry.isIntersecting) return;
+                const groupEntry = entry.target._groupEntry;
+                if (!groupEntry || groupEntry.renderAll) return;
+                if (groupEntry.renderedCount >= groupEntry.variables.length) {
+                  groupChunkObserver.unobserve(entry.target);
+                  return;
+                }
+                queueGroupRender(groupEntry, false);
+              });
+            },
+            {
+              root: mainEl,
+              rootMargin: "0px 0px 320px 0px",
+              threshold: 0,
+            },
+          );
+          groupRenderObserver = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                if (!entry.isIntersecting) return;
+                const groupEntry = entry.target._groupEntry;
+                if (!groupEntry) return;
+                queueGroupRender(groupEntry, false);
+                groupRenderObserver.unobserve(entry.target);
+              });
+            },
+            {
+              root: mainEl,
+              rootMargin: "160px 0px 220px 0px",
+              threshold: 0,
+            },
+          );
+          filterIndex.forEach((groupEntry) => {
+            groupEntry.header._groupEntry = groupEntry;
+            groupRenderObserver.observe(groupEntry.header);
+          });
+        } else {
+          filterIndex.forEach((groupEntry) => {
+            queueGroupRender(groupEntry, true);
+          });
+        }
+
+        if (filterIndex[0]) {
+          queueGroupRender(filterIndex[0], false);
+        }
+
+        if (state.filterQuery) {
+          applyVariableFilter(state.filterQuery);
+        }
+        state.renderContext = {
+          groupEntries: groupEntriesByType,
+        };
+      }
+
+      function applyVariableFilter(query) {
+        const q = (query || "").toLowerCase();
+        const hasQuery = q.length > 0;
+        (state.filterIndex || []).forEach((group) => {
+          let expectedVisibleCount = group.variables.length;
+          if (hasQuery) {
+            if (group.renderedCount < group.variables.length) {
+              group.renderAll = true;
+              if (group.queueRender) group.queueRender(true);
+            }
+            expectedVisibleCount = 0;
+            group.variables.forEach((variable) => {
+              if ((variable._searchText || "").includes(q))
+                expectedVisibleCount++;
+            });
+          }
+          let visibleCount = 0;
+          group.cards.forEach((card) => {
+            const text = card.dataset.search || "";
+            const isHidden = hasQuery && !text.includes(q);
+            card.classList.toggle("hidden", isHidden);
+            if (!isHidden) visibleCount++;
+          });
+          const allHidden = hasQuery
+            ? expectedVisibleCount === 0
+            : visibleCount === 0;
+          if (group.container) {
+            group.container.classList.toggle("hidden", allHidden);
+          } else {
+            group.header.classList.toggle("hidden", allHidden);
+            group.body.classList.toggle("hidden", allHidden);
+          }
+        });
+      }
+
+      /**
+       * Bulk remap panel — lets the user pick a source library and a target collection,
+       * then bulk-apply that mapping to every variable from that source.
+       */
+      function buildBulkRemapPanel() {
+        const panel = document.createElement("div");
+        panel.className = "bulk-remap-panel";
+        window._bulkPanelRef = panel;
+
+        let expanded = false;
+
+        const header = document.createElement("div");
+        header.className = "bulk-remap-header";
+        header.innerHTML = `
+    <span class="var-group-chevron" id="bulkChevron">▸</span>
+    <span class="bulk-remap-title">Bulk Remap by Library</span>
+    <span class="bulk-remap-subtitle">Map all variables from one library at once</span>
+  `;
+
+        const body = document.createElement("div");
+        body.className = "bulk-remap-body collapsed";
+        body.id = "bulkRemapBody";
+
+        const sourceLibs = state.sourceLibraries || [];
+
+        const srcOptions = sourceLibs
+          .map((s, i) => `<option value="${i}">${escHtml(s.label)}</option>`)
+          .join("");
+        const orderedCollections = getOrderedLibraryCollections();
+        const tgtOptions = orderedCollections
+          .map(
+            (c, i) =>
+              `<option value="${i}">${escHtml(c.libraryName || "")} → ${escHtml(c.name)}</option>`,
+          )
+          .join("");
+
+        body.innerHTML = `
+    <div class="bulk-remap-description">
+      Select source and target — all variables from that source will be pre-mapped.
+      You can still override individual variables below.
+    </div>
+    <div class="bulk-remap-row">
+      <div class="select-wrap select-wrap-fill">
+        <select id="bulkSrcSel">
+          <option value="">— source library / collection —</option>
+          ${srcOptions}
+        </select>
+        <span class="select-arrow">▾</span>
+      </div>
+      <span class="bulk-arrow">›</span>
+      <div class="select-wrap select-wrap-fill">
+        <select id="bulkTgtColSel">
+          <option value="">— target collection —</option>
+          ${tgtOptions}
+        </select>
+        <span class="select-arrow">▾</span>
+      </div>
+    </div>
+    <div id="bulkTgtVarRow" class="bulk-target-row">
+      <div class="select-wrap">
+        <select id="bulkTgtVarSel"><option value="">— loading variables… —</option></select>
+        <span class="select-arrow">▾</span>
+      </div>
+    </div>
+    <div id="bulkStatus" class="bulk-status"></div>
+    <button class="btn btn-secondary btn-sm bulk-apply-btn" id="bulkApplyBtn" disabled>Apply to All Matching</button>
+  `;
+
+        panel.appendChild(header);
+        panel.appendChild(body);
+
+        header.addEventListener("click", () => {
+          expanded = !expanded;
+          body.classList.toggle("collapsed", !expanded);
+          panel.querySelector("#bulkChevron").textContent = expanded
+            ? "▾"
+            : "▸";
+        });
+
+        const srcSel = panel.querySelector("#bulkSrcSel");
+        const tgtColSel = panel.querySelector("#bulkTgtColSel");
+        const tgtVarRow = panel.querySelector("#bulkTgtVarRow");
+        const tgtVarSel = panel.querySelector("#bulkTgtVarSel");
+        const bulkStatus = panel.querySelector("#bulkStatus");
+        const applyBtn = panel.querySelector("#bulkApplyBtn");
+
+        let selectedSourceLib = null;
+        let selectedTargetCollection = null;
+        let targetVars = [];
+
+        function checkReady() {
+          const varSelected = tgtVarSel.value !== "";
+          applyBtn.disabled =
+            !selectedSourceLib || !selectedTargetCollection || !varSelected;
+        }
+
+        srcSel.addEventListener("change", () => {
+          selectedSourceLib =
+            srcSel.value !== "" ? sourceLibs[parseInt(srcSel.value)] : null;
+          checkReady();
+        });
+
+        tgtColSel.addEventListener("change", () => {
+          tgtVarRow.style.display = "none";
+          tgtVarSel.innerHTML = '<option value="">— loading… —</option>';
+          applyBtn.disabled = true;
+          const idx = tgtColSel.value;
+          if (idx === "") {
+            selectedTargetCollection = null;
+            return;
+          }
+          selectedTargetCollection = getCollectionAtIndex(
+            orderedCollections,
+            idx,
+          );
+          if (!selectedTargetCollection) return;
+          rememberRecentCollection(selectedTargetCollection.key);
+
+          const ck = selectedTargetCollection.key;
+          if (state.libraryVariableCache[ck]) {
+            populateBulkVarSel(state.libraryVariableCache[ck]);
+          } else {
+            requestLibraryVariables(
+              ck,
+              selectedTargetCollection.isLocal,
+              selectedTargetCollection.localId || null,
+            );
+            panel._bulkPendingKey = ck;
+            panel._bulkPopulate = populateBulkVarSel;
+          }
+        });
+
+        function populateBulkVarSel(vars) {
+          targetVars = vars;
+          tgtVarSel.innerHTML =
+            '<option value="">— choose a target variable (name-matched by default) —</option>' +
+            vars
+              .map((v, i) => `<option value="${i}">${escHtml(v.name)}</option>`)
+              .join("");
+          tgtVarRow.style.display = "block";
+          checkReady();
+        }
+
+        tgtVarSel.addEventListener("change", checkReady);
+
+        applyBtn.addEventListener("click", () => {
+          if (!selectedSourceLib || !selectedTargetCollection) return;
+          const selectedVar =
+            tgtVarSel.value !== ""
+              ? targetVars[parseInt(tgtVarSel.value)]
+              : null;
+          const targetVarByName = new Map();
+          const targetVarByLeafName = new Map();
+          targetVars.forEach((targetVar) => {
+            if (!targetVarByName.has(targetVar.name)) {
+              targetVarByName.set(targetVar.name, targetVar);
+            }
+            if (!targetVarByLeafName.has(targetVar._leafName)) {
+              targetVarByLeafName.set(targetVar._leafName, targetVar);
+            }
+          });
+
+          // Get all variables from the selected source collection
+          const sourceVars =
+            state.sourceVariablesByCollectionId[selectedSourceLib.key] || [];
+
+          let applied = 0;
+          const updatedVariableIds = [];
+          for (const v of sourceVars) {
+            // Try exact name match first, then leaf-name match, then manual fallback.
+            const nameMatch =
+              targetVarByName.get(v.name) ||
+              targetVarByLeafName.get(v._leafName);
+            const bestMatch = nameMatch || selectedVar;
+            if (!bestMatch) continue;
+
+            state.mappings[v.id] = {
+              collectionKey: selectedTargetCollection.key,
+              fromVariableKey: v.key || null,
+              fromCollectionKey: selectedSourceLib.key,
+              isLocal: selectedTargetCollection.isLocal,
+              localId: selectedTargetCollection.localId || null,
+              variableKey: bestMatch.key || null,
+              variableLocalId: bestMatch.localId || null,
+              variableIsLocal: bestMatch.isLocal || false,
+            };
+            applied++;
+            updatedVariableIds.push(v.id);
+          }
+          if (applied > 0) {
+            clearVariableErrors(updatedVariableIds);
+            bumpMappingVersion();
+            flashVariableFeedback(updatedVariableIds, {
+              animateMapped: true,
+              highlight: true,
+            });
+          }
+
+          bulkStatus.style.color =
+            applied > 0 ? "var(--green)" : "var(--yellow)";
+          bulkStatus.textContent =
+            applied > 0
+              ? `✓ Pre-mapped ${applied} variable${applied !== 1 ? "s" : ""} — review and adjust below, then Apply Remapping.`
+              : "No matching variables found from that source.";
+
+          // Re-render to update card states
+          renderMain();
+          updateRebindBtn();
+        });
+
+        return panel;
+      }
+
+      function safeId(id) {
+        // Figma variable IDs look like "VariableID:123:456" — colons are invalid in CSS selectors
+        return (id || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+      }
+
+      function getCollectionAtIndex(collections, indexValue) {
+        const index = Number(indexValue);
+        return Number.isInteger(index) && index >= 0
+          ? collections[index]
+          : null;
+      }
+
+      function buildUsageItem(
+        variable,
+        n,
+        orderedCollections,
+        nodeLibraryOptionsMarkup,
+      ) {
+        const item = document.createElement("div");
+        item.className = "layer-item";
+
+        const row = document.createElement("div");
+        row.className = "layer-row" + (n.h ? " is-hidden" : "");
+        row._nodeId = n.id;
+
+        const iconSpan = document.createElement("span");
+        iconSpan.className = "layer-row-icon";
+        if (n.t === "INSTANCE") {
+          iconSpan.innerHTML =
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" style="pointer-events:none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        } else if (n.t === "TEXT") {
+          iconSpan.innerHTML =
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" style="pointer-events:none"><path d="M4 7V4h16v3M9 20h6M12 4v16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        } else {
+          iconSpan.innerHTML =
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" style="pointer-events:none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/></svg>';
+        }
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "layer-row-name";
+        nameSpan.title = n.n + (n.h ? " (hidden)" : "");
+        nameSpan.textContent = n.n;
+
+        let hiddenIcon = null;
+        if (n.h) {
+          hiddenIcon = document.createElement("span");
+          hiddenIcon.className = "layer-row-hidden-icon";
+          hiddenIcon.title = "This layer is hidden";
+          hiddenIcon.innerHTML = EYE_OFF_ICON;
+        }
+
+        const pageSpan = document.createElement("span");
+        pageSpan.className = "layer-row-page";
+        pageSpan.title = n.p;
+        pageSpan.textContent = n.p;
+
+        const mapDot = document.createElement("span");
+        mapDot.className = "node-map-indicator";
+
+        // Check if ANY variable mapping exists for this node
+        const nodeHasMapping = Object.values(state.nodeMappings).some(
+          (m) => m && m.nodeId === n.id && m.variableKey,
+        );
+        if (nodeHasMapping) {
+          row.classList.add("node-mapped");
+          mapDot.style.background = "#4aba62";
+        }
+
+        const expandBtn = document.createElement("button");
+        expandBtn.className = "layer-row-expand";
+        expandBtn.title = "Map this layer individually";
+        expandBtn.innerHTML =
+          '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" style="pointer-events:none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        const rowNav = document.createElement("button");
+        rowNav.className = "layer-row-nav";
+        rowNav.title = "Select in Figma";
+        rowNav.appendChild(makeCrosshair(11));
+        rowNav.addEventListener("click", (e) => {
+          e.stopPropagation();
+          parent.postMessage(
+            {
+              pluginMessage: { type: "select-nodes", nodeIds: [n.id] },
+            },
+            "*",
+          );
+        });
+
+        row.appendChild(iconSpan);
+        row.appendChild(nameSpan);
+        if (hiddenIcon) row.appendChild(hiddenIcon);
+        row.appendChild(pageSpan);
+        row.appendChild(mapDot);
+        row.appendChild(expandBtn);
+        row.appendChild(rowNav);
+
+        const nodePanel = document.createElement("div");
+        nodePanel.className = "node-map-panel";
+
+        function ensureNodePanelInitialized() {
+          if (nodePanel.dataset.initialized === "true") return;
+          nodePanel.dataset.initialized = "true";
+
+          const nodeCollectSelect = document.createElement("select");
+          nodeCollectSelect.className = "node-collection-select";
+          nodeCollectSelect.innerHTML = nodeLibraryOptionsMarkup;
+
+          const nodeSubSelect = document.createElement("div");
+          nodeSubSelect.className = "sub-select";
+          nodeSubSelect.style.display = "none";
+
+          nodePanel.appendChild(nodeCollectSelect);
+          nodePanel.appendChild(nodeSubSelect);
+
+          nodeCollectSelect.addEventListener("click", (e) =>
+            e.stopPropagation(),
+          );
+          nodeCollectSelect.addEventListener("change", (e) => {
+            e.stopPropagation();
+            const idx = e.target.value;
+            nodeSubSelect.style.display = "none";
+            nodeSubSelect.innerHTML = "";
+            if (idx === "") {
+              // Remove all mappings for this node+variable combination
+              const keysToRemove = Object.keys(state.nodeMappings).filter((k) =>
+                k.startsWith(n.id + "|"),
+              );
+              keysToRemove.forEach((k) => delete state.nodeMappings[k]);
+              bumpMappingVersion();
+              row.classList.remove("node-mapped");
+              mapDot.style.background = "";
+              updateRebindBtn();
+              updateSummary();
+              return;
+            }
+            const collection = getCollectionAtIndex(orderedCollections, idx);
+            if (!collection) return;
+            rememberRecentCollection(collection.key);
+            const sourceCollKey =
+              variable.key && state.variableKeyToCollectionKey
+                ? state.variableKeyToCollectionKey[variable.key]
+                : variable.collectionId && state.boundIdToCollectionKey
+                  ? state.boundIdToCollectionKey[variable.id]
+                  : null;
+            const nodeMappingKey = n.id + "|" + variable.id;
+            state.nodeMappings[nodeMappingKey] = {
+              nodeId: n.id,
+              fromVariableId: variable.id,
+              fromVariableKey: variable.key || null,
+              sourceCollectionKey: sourceCollKey,
+              collectionKey: collection.key,
+              isLocal: collection.isLocal,
+              localId: collection.localId || null,
+              variableKey: null,
+            };
+            bumpMappingVersion();
+            if (state.libraryVariableCache[collection.key]) {
+              renderNodeSubSelect(
+                variable,
+                collection.key,
+                nodeSubSelect,
+                n.id,
+                row,
+                mapDot,
+              );
+            } else {
+              nodeSubSelect.style.display = "flex";
+              nodeSubSelect.innerHTML = '<div class="spinner"></div>';
+              requestLibraryVariables(
+                collection.key,
+                collection.isLocal,
+                collection.localId || null,
+              );
+              queuePendingSubSelect(collection.key, nodeSubSelect, () =>
+                renderNodeSubSelect(
+                  variable,
+                  collection.key,
+                  nodeSubSelect,
+                  n.id,
+                  row,
+                  mapDot,
+                ),
+              );
+            }
+          });
+
+          // Find any existing mapping for this node
+          const nodeMappingKey = Object.keys(state.nodeMappings).find((k) =>
+            k.startsWith(n.id + "|"),
+          );
+          const currentNodeMapping = nodeMappingKey
+            ? state.nodeMappings[nodeMappingKey]
+            : null;
+          if (currentNodeMapping && currentNodeMapping.collectionKey) {
+            const selectedIndex = orderedCollections.findIndex(
+              (collection) =>
+                collection.key === currentNodeMapping.collectionKey,
+            );
+            if (selectedIndex >= 0) {
+              nodeCollectSelect.value = String(selectedIndex);
+              if (
+                state.libraryVariableCache[currentNodeMapping.collectionKey]
+              ) {
+                renderNodeSubSelect(
+                  variable,
+                  currentNodeMapping.collectionKey,
+                  nodeSubSelect,
+                  n.id,
+                  row,
+                  mapDot,
+                );
+              } else {
+                nodeSubSelect.style.display = "flex";
+                nodeSubSelect.innerHTML = '<div class="spinner"></div>';
+                queuePendingSubSelect(
+                  currentNodeMapping.collectionKey,
+                  nodeSubSelect,
+                  () =>
+                    renderNodeSubSelect(
+                      variable,
+                      currentNodeMapping.collectionKey,
+                      nodeSubSelect,
+                      n.id,
+                      row,
+                      mapDot,
+                    ),
+                );
+                requestLibraryVariables(
+                  currentNodeMapping.collectionKey,
+                  currentNodeMapping.isLocal,
+                  currentNodeMapping.localId || null,
+                );
+              }
+            }
+          }
+        }
+
+        expandBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          // Close all other expanded layer panels when opening a new one
+          document.querySelectorAll(".layer-row.expanded").forEach((r) => {
+            if (r !== row) {
+              r.classList.remove("expanded");
+              const otherPanel = r
+                .closest(".layer-item")
+                ?.querySelector(".node-map-panel.open");
+              if (otherPanel) otherPanel.classList.remove("open");
+            }
+          });
+          ensureNodePanelInitialized();
+          const isOpen = nodePanel.classList.toggle("open");
+          row.classList.toggle("expanded", isOpen);
+        });
+
+        row.addEventListener("click", (e) => {
+          if (e.target.closest(".layer-row-expand")) return;
+          e.stopPropagation();
+          parent.postMessage(
+            {
+              pluginMessage: { type: "select-nodes", nodeIds: [n.id] },
+            },
+            "*",
+          );
+        });
+
+        item.appendChild(row);
+        item.appendChild(nodePanel);
+        return item;
+      }
+
+      function ensureUsagesModal() {
+        if (usagesModalRef) return usagesModalRef;
+        const overlay = document.createElement("div");
+        overlay.className = "usages-modal-overlay";
+        overlay.innerHTML = `
+          <div class="usages-modal" role="dialog" aria-modal="true" aria-label="Variable usages">
+            <div class="usages-modal-header">
+              <div>
+                <div class="usages-modal-title" id="usagesModalTitle">Variable usages</div>
+                <div class="usages-modal-subtitle" id="usagesModalSubtitle"></div>
+              </div>
+              <button class="usages-modal-close" id="usagesModalClose" aria-label="Close">×</button>
+            </div>
+            <div class="usages-modal-toolbar">
+              <label class="usages-filter">
+                <input type="checkbox" id="usagesHiddenOnly" />
+                <span>Show hidden layers only</span>
+              </label>
+              <button class="btn btn-secondary btn-sm" id="usagesSelectAllBtn">Select visible layers</button>
+            </div>
+            <div class="usages-modal-body" id="usagesModalBody"></div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.addEventListener("click", (e) => {
+          if (e.target === overlay) overlay.classList.remove("open");
+        });
+        overlay
+          .querySelector("#usagesModalClose")
+          .addEventListener("click", () => {
+            overlay.classList.remove("open");
+          });
+        overlay
+          .querySelector("#usagesHiddenOnly")
+          .addEventListener("change", () => {
+            if (!overlay._render) return;
+            overlay._render();
+          });
+        overlay
+          .querySelector("#usagesSelectAllBtn")
+          .addEventListener("click", () => {
+            const nodes = (overlay._nodes || []).filter((n) =>
+              overlay.querySelector("#usagesHiddenOnly").checked ? n.h : true,
+            );
+            parent.postMessage(
+              {
+                pluginMessage: {
+                  type: "select-nodes",
+                  nodeIds: nodes.map((node) => node.id),
+                },
+              },
+              "*",
+            );
+          });
+        usagesModalRef = overlay;
+        return overlay;
+      }
+
+      function openVariableUsagesModal(
+        variable,
+        orderedCollections,
+        nodeLibraryOptionsMarkup,
+      ) {
+        const overlay = ensureUsagesModal();
+        const titleEl = overlay.querySelector("#usagesModalTitle");
+        const subtitleEl = overlay.querySelector("#usagesModalSubtitle");
+        const bodyEl = overlay.querySelector("#usagesModalBody");
+        const hiddenOnlyEl = overlay.querySelector("#usagesHiddenOnly");
+
+        titleEl.textContent = variable.name;
+        subtitleEl.textContent = "Layers using this variable";
+        hiddenOnlyEl.checked = false;
+        overlay._nodes = state.nodesByVariable[variable.id] || null;
+
+        overlay._render = () => {
+          const allNodes = overlay._nodes || [];
+          const visibleNodes = hiddenOnlyEl.checked
+            ? allNodes.filter((n) => n.h)
+            : allNodes;
+          bodyEl.innerHTML = "";
+          if (!overlay._nodes) {
+            bodyEl.innerHTML =
+              '<div class="usages-modal-empty"><span class="spinner"></span> Loading layer usages…</div>';
+            return;
+          }
+          if (visibleNodes.length === 0) {
+            bodyEl.innerHTML = `<div class="usages-modal-empty">${
+              hiddenOnlyEl.checked
+                ? "No hidden layers use this variable."
+                : "No layers use this variable."
+            }</div>`;
+            return;
+          }
+          const list = document.createElement("div");
+          list.className = "usages-modal-list";
+          const listFragment = document.createDocumentFragment();
+          visibleNodes.forEach((node) => {
+            listFragment.appendChild(
+              buildUsageItem(
+                variable,
+                node,
+                orderedCollections,
+                nodeLibraryOptionsMarkup,
+              ),
+            );
+          });
+          list.appendChild(listFragment);
+          bodyEl.appendChild(list);
+        };
+
+        overlay._render();
+        overlay.classList.add("open");
+
+        if (!overlay._nodes) {
+          requestVariableNodes(variable.id, (nodes) => {
+            overlay._nodes = nodes || [];
+            if (overlay.classList.contains("open")) {
+              overlay._render();
+            }
+          });
+        }
+      }
+
+      function buildVarCard(
+        variable,
+        orderedCollections,
+        collectionIndexByKey,
+        libraryOptionsMarkup,
+        nodeLibraryOptionsMarkup,
+      ) {
+        const card = document.createElement("div");
+        card.className = "var-card" + (variable.broken ? " broken" : "");
+        card.dataset.varid = variable.id;
+        card.dataset.safevarid = variable._safeId;
+        card.dataset.search = variable._searchText;
+        const variableErrors = state.variableErrorsById[variable.id] || [];
+
+        if (getMappingSummary().mappedVariableIds.has(variable.id)) {
+          card.classList.add("mapped");
+        }
+        if (state.justMappedVariableIds[variable.id]) {
+          card.classList.add("just-mapped");
+        }
+        if (state.recentlyUpdatedVariableIds[variable.id]) {
+          card.classList.add("recent-update");
+        }
+        if (variableErrors.length > 0) {
+          card.classList.add("has-errors");
+        }
+
+        const sourceLabel = variable._sourceLabel;
+
+        const nodeSummary = state.nodeSummaryByVariableId[variable.id] || {
+          nodeCount: 0,
+          hiddenCount: 0,
+          hasInstances: false,
+        };
+        const nodeCount = nodeSummary.nodeCount || 0;
+        const hiddenCount = nodeSummary.hiddenCount;
+        const hasInstances = nodeSummary.hasInstances;
+        // Instance icon (hexagon-like component) vs generic layer diamond
+        const countIcon = hasInstances
+          ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" style="pointer-events:none;flex-shrink:0"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+          : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" style="pointer-events:none;flex-shrink:0"><path d="M12 2l9 9-9 9-9-9 9-9z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        const sid = variable._safeId;
+
+        // Scaffold static HTML (no interactive elements injected as strings)
+        card.innerHTML = `
+    <div class="var-card-header">
+      <span class="var-type-badge type-${variable.resolvedType}">${variable.resolvedType.slice(0, 3)}</span>
+      <span class="var-name">${escHtml(variable.name)}</span>
+      <span class="var-from" title="${escHtml(sourceLabel)}">${escHtml(sourceLabel)}</span>
+      ${variableErrors.length > 0 ? `<span class="var-error-badge">${variableErrors.length} issue${variableErrors.length !== 1 ? "s" : ""}</span>` : ""}
+      <div class="layer-actions" id="la-${sid}"></div>
+    </div>
+    ${
+      variableErrors.length > 0
+        ? `<div class="var-inline-errors">${variableErrors
+            .slice(0, 2)
+            .map(
+              (message) =>
+                `<div class="var-inline-error">${STATUS_ICONS.error}<span>${escHtml(message)}</span></div>`,
+            )
+            .join("")}</div>`
+        : ""
+    }
+    <div class="var-card-body"></div>
+  `;
+
+        const laDiv = card.querySelector("#la-" + sid);
+        const cardBody = card.querySelector(".var-card-body");
+        const mappedDot = document.createElement("span");
+        mappedDot.className = "mapped-indicator";
+
+        function ensureCardBodyInitialized() {
+          if (!cardBody || cardBody.dataset.initialized === "true") return;
+          cardBody.dataset.initialized = "true";
+          cardBody.innerHTML = `
+      <div class="var-meta">${escHtml(variable.id)}</div>
+      <div>
+        <div class="section-title" style="margin-bottom:5px">Map to Library Collection</div>
+        <div class="select-wrap">
+          <select class="collection-select" data-varid="${escHtml(variable.id)}">
+            <option value="">— choose target library —</option>
+            ${libraryOptionsMarkup}
+          </select>
+          <span class="select-arrow">▾</span>
+        </div>
+        <div class="sub-select" id="sub-${sid}" style="display:none"></div>
+      </div>
+    `;
+
+          const collectionSelect = cardBody.querySelector(".collection-select");
+          const subDiv = cardBody.querySelector("#sub-" + sid);
+          const currentMapping = state.mappings[variable.id];
+
+          if (collectionSelect) {
+            collectionSelect.addEventListener("change", (e) => {
+              const idx = e.target.value;
+
+              if (idx === "") {
+                subDiv.style.display = "none";
+                subDiv.innerHTML = "";
+                delete state.mappings[variable.id];
+                clearVariableErrors([variable.id]);
+                bumpMappingVersion();
+                card.classList.remove("mapped");
+                updateRebindBtn();
+                updateSummary();
+                return;
+              }
+
+              const collection = getCollectionAtIndex(orderedCollections, idx);
+              if (!collection) return;
+              rememberRecentCollection(collection.key);
+              const collectionKey = collection.key;
+
+              state.mappings[variable.id] = {
+                collectionKey,
+                fromVariableKey: variable.key || null,
+                fromCollectionKey: variable.collectionId
+                  ? state.variableKeyToCollectionKey?.[variable.key] ||
+                    state.boundIdToCollectionKey?.[variable.id] ||
+                    null
+                  : null,
+                isLocal: collection.isLocal,
+                localId: collection.localId || null,
+                variableKey: null,
+                variableLocalId: null,
+              };
+              bumpMappingVersion();
+
+              if (state.libraryVariableCache[collectionKey]) {
+                renderSubSelect(variable, collectionKey, subDiv);
+              } else {
+                subDiv.style.display = "flex";
+                subDiv.innerHTML = '<div class="spinner"></div>';
+                requestLibraryVariables(
+                  collectionKey,
+                  collection.isLocal,
+                  collection.localId || null,
+                );
+                queuePendingSubSelect(collectionKey, subDiv, () =>
+                  renderSubSelect(variable, collectionKey, subDiv),
+                );
+              }
+            });
+          }
+
+          if (currentMapping && collectionSelect) {
+            const selectedIndex =
+              currentMapping.collectionKey != null
+                ? collectionIndexByKey[currentMapping.collectionKey]
+                : undefined;
+            if (selectedIndex !== undefined) {
+              collectionSelect.value = String(selectedIndex);
+              if (state.libraryVariableCache[currentMapping.collectionKey]) {
+                renderSubSelect(variable, currentMapping.collectionKey, subDiv);
+              } else {
+                subDiv.style.display = "flex";
+                subDiv.innerHTML = '<div class="spinner"></div>';
+                queuePendingSubSelect(
+                  currentMapping.collectionKey,
+                  subDiv,
+                  () =>
+                    renderSubSelect(
+                      variable,
+                      currentMapping.collectionKey,
+                      subDiv,
+                    ),
+                );
+                requestLibraryVariables(
+                  currentMapping.collectionKey,
+                  currentMapping.isLocal,
+                  currentMapping.localId || null,
+                );
+              }
+            }
+          }
+        }
+
+        if (nodeCount > 0) {
+          const usagesBtn = document.createElement("button");
+          usagesBtn.className = "layer-count-btn";
+          usagesBtn.title = "Open layer usages";
+          usagesBtn.innerHTML =
+            countIcon +
+            '<span style="margin-left:3px">Instances (' +
+            nodeCount +
+            ")</span>";
+          usagesBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openVariableUsagesModal(
+              variable,
+              orderedCollections,
+              nodeLibraryOptionsMarkup,
+            );
+          });
+          laDiv.appendChild(usagesBtn);
+        }
+
+        laDiv.appendChild(mappedDot);
+
+        // Toggle expand on header (but not layer-actions buttons)
+        card
+          .querySelector(".var-card-header")
+          .addEventListener("click", (e) => {
+            if (e.target.closest(".layer-actions button")) return;
+            const isExpanded = card.classList.toggle("expanded");
+            if (isExpanded) ensureCardBodyInitialized();
+          });
+
+        return card;
+      }
+
+      function renderSubSelectForCollection(collectionKey) {
+        const pending = state.pendingSubSelects[collectionKey] || [];
+        if (pending.length === 0) return;
+        delete state.pendingSubSelects[collectionKey];
+        pending.forEach((entry) => {
+          if (!entry.element || !document.contains(entry.element)) return;
+          entry.render();
+        });
+      }
+
+      function renderNodeSubSelect(
+        variable,
+        collectionKey,
+        container,
+        nodeId,
+        row,
+        mapDot,
+      ) {
+        const filtered = getMatchingVariablesForType(
+          collectionKey,
+          variable.resolvedType,
+        );
+
+        container.style.display = "block";
+        container.innerHTML = "";
+
+        const label = document.createElement("div");
+        label.className = "section-title";
+        label.style.marginBottom = "4px";
+        label.textContent =
+          "Target Variable (" + filtered.length + " matching)";
+        container.appendChild(label);
+
+        const nodeMappingKey = nodeId + "|" + variable.id;
+        const nm = state.nodeMappings[nodeMappingKey];
+        const currentKey = nm ? nm.variableKey : null;
+
+        const picker = buildGroupedPicker({
+          variables: filtered,
+          selectedKey: currentKey,
+          placeholder: "— choose variable —",
+          small: true,
+          onChange: (selectedVar) => {
+            const nodeMappingKey2 = nodeId + "|" + variable.id;
+            const nm2 = state.nodeMappings[nodeMappingKey2];
+            if (!nm2) return;
+            const wasMapped = !!nm2.variableKey;
+            if (!selectedVar) {
+              nm2.variableKey = null;
+              bumpMappingVersion();
+              row.classList.remove("node-mapped");
+              mapDot.style.background = "";
+            } else {
+              nm2.variableKey = selectedVar.key || null;
+              nm2.variableLocalId = selectedVar.localId || null;
+              nm2.variableIsLocal = selectedVar.isLocal || false;
+              clearVariableErrors([variable.id]);
+              bumpMappingVersion();
+              row.classList.add("node-mapped");
+              mapDot.style.background = "#4aba62";
+              if (!wasMapped) {
+                flashVariableFeedback([variable.id], {
+                  animateMapped: true,
+                  highlight: false,
+                });
+              }
+            }
+            updateRebindBtn();
+            updateSummary();
+          },
+        });
+        container.appendChild(picker);
+      }
+
+      function renderSubSelect(variable, collectionKey, container) {
+        const filtered = getMatchingVariablesForType(
+          collectionKey,
+          variable.resolvedType,
+        );
+
+        container.style.display = "block";
+        container.innerHTML = `<div class="section-title" style="margin-bottom:5px">Target Variable (${filtered.length} matching)</div>`;
+
+        const currentKey = state.mappings[variable.id]
+          ? state.mappings[variable.id].variableKey
+          : null;
+
+        const picker = buildGroupedPicker({
+          variables: filtered,
+          selectedKey: currentKey,
+          placeholder: "— choose variable —",
+          onChange: (selectedVar) => {
+            const mapping = state.mappings[variable.id];
+            if (!mapping) return;
+            const wasMapped = !!mapping.variableKey;
+            if (!selectedVar) {
+              mapping.variableKey = null;
+              mapping.variableLocalId = null;
+            } else {
+              mapping.variableKey = selectedVar.key || null;
+              mapping.variableLocalId = selectedVar.localId || null;
+              mapping.variableIsLocal = selectedVar.isLocal || false;
+            }
+            clearVariableErrors([variable.id]);
+            bumpMappingVersion();
+            const card = document.querySelector(
+              '.var-card[data-safevarid="' + safeId(variable.id) + '"]',
+            );
+            if (card) {
+              card.classList.toggle(
+                "mapped",
+                getMappingSummary().mappedVariableIds.has(variable.id),
+              );
+              if (!wasMapped && selectedVar) {
+                card.classList.add("just-mapped");
+              }
+            }
+            if (!wasMapped && selectedVar) {
+              flashVariableFeedback([variable.id], {
+                animateMapped: true,
+                highlight: false,
+              });
+            }
+            updateRebindBtn();
+            updateSummary();
+          },
+        });
+        container.appendChild(picker);
+      }
+
+      function getMatchingVariablesForType(collectionKey, resolvedType) {
+        const typeKey = resolvedType || "UNKNOWN";
+        if (!state.libraryVariableTypeCache[collectionKey]) {
+          state.libraryVariableTypeCache[collectionKey] = {};
+        }
+        const cache = state.libraryVariableTypeCache[collectionKey];
+        if (cache[typeKey]) return cache[typeKey];
+
+        const vars = state.libraryVariableCache[collectionKey] || [];
+        const filtered =
+          typeKey === "UNKNOWN"
+            ? vars
+            : vars.filter((v) => v.resolvedType === typeKey);
+
+        cache[typeKey] = filtered;
+        return filtered;
+      }
+
+      /**
+       * Build a custom grouped variable picker that mimics Figma's own variable picker.
+       * Variable names like "Status/Error" or "Gray scale/Neutral 700" are parsed
+       * into collapsible group trees.
+       *
+       * @param {object} opts
+       * @param {Array}    opts.variables   - array of variable objects with .name / .key
+       * @param {string}   opts.selectedKey - currently selected variable key (or null)
+       * @param {string}   opts.placeholder - text shown when nothing selected
+       * @param {boolean}  opts.small       - use compact sizing (node-panel context)
+       * @param {Function} opts.onChange    - called with the selected variable obj (or null)
+       */
+      function buildGroupedPicker(opts) {
+        const { variables, selectedKey, placeholder, small, onChange } = opts;
+
+        function getPickerData(vars) {
+          let cached = state.pickerDataCache.get(vars);
+          if (cached) return cached;
+
+          const root = { children: {}, items: [], count: 0 };
+          const searchIndex = vars.map((v) => ({
+            variable: v,
+            leafName: v._leafName,
+            lowerName: v._lowerName,
+          }));
+
+          for (const v of vars) {
+            const parts = v._pathSegments || [v._leafName];
+            root.count += 1;
+            if (parts.length === 1) {
+              root.items.push({ variable: v, leafName: v._leafName });
+              continue;
+            }
+
+            let node = root;
+            for (let i = 0; i < parts.length - 1; i++) {
+              const seg = parts[i].trim();
+              if (!node.children[seg]) {
+                node.children[seg] = { children: {}, items: [], count: 0 };
+              }
+              node = node.children[seg];
+              node.count += 1;
+            }
+
+            node.items.push({
+              variable: v,
+              leafName: v._leafName,
+            });
+          }
+
+          cached = { tree: root, searchIndex };
+          state.pickerDataCache.set(vars, cached);
+          return cached;
+        }
+
+        // ── State ────────────────────────────────────────────────────────────────
+        let selectedVar = variables.find((v) => v.key === selectedKey) || null;
+        const pickerData = getPickerData(variables);
+        const tree = pickerData.tree;
+        const searchIndex = pickerData.searchIndex;
+
+        // Wrapper
+        const pickerWrap = document.createElement("div");
+        pickerWrap.className = "var-picker";
+
+        // Trigger button
+        const trigger = document.createElement("button");
+        trigger.className = "var-picker-trigger" + (small ? " small" : "");
+        trigger.type = "button";
+
+        const triggerText = document.createElement("span");
+        triggerText.className = "var-picker-trigger-text";
+        triggerText.textContent = selectedVar ? selectedVar.name : placeholder;
+        trigger.appendChild(triggerText);
+        const triggerArrow = document.createElement("span");
+        triggerArrow.className = "var-picker-trigger-arrow";
+        triggerArrow.textContent = "▾";
+        trigger.appendChild(triggerArrow);
+
+        // Dropdown
+        const dropdown = document.createElement("div");
+        dropdown.className = "var-picker-dropdown";
+
+        // Search
+        const searchWrap = document.createElement("div");
+        searchWrap.className = "var-picker-search-wrap";
+        const searchInput = document.createElement("input");
+        searchInput.className = "var-picker-search";
+        searchInput.placeholder = "Search variables…";
+        searchInput.type = "text";
+        searchWrap.appendChild(searchInput);
+        dropdown.appendChild(searchWrap);
+
+        // List
+        const list = document.createElement("div");
+        list.className = "var-picker-list";
+        dropdown.appendChild(list);
+
+        pickerWrap.appendChild(trigger);
+        pickerWrap.appendChild(dropdown);
+
+        // ── Render list (grouped or flat search results) ─────────────────────────
+        function renderList(query) {
+          const fragment = document.createDocumentFragment();
+
+          // Blank / clear option
+          const blankRow = document.createElement("div");
+          blankRow.className =
+            "var-picker-blank" + (!selectedVar ? " selected" : "");
+          blankRow.textContent = placeholder;
+          blankRow.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            select(null);
+          });
+          fragment.appendChild(blankRow);
+
+          if (query) {
+            // Flat filtered results
+            const q = query.toLowerCase();
+            const results = searchIndex.filter((entry) =>
+              entry.lowerName.includes(q),
+            );
+            if (results.length === 0) {
+              const empty = document.createElement("div");
+              empty.className = "var-picker-empty";
+              empty.textContent = "No variables match your search";
+              fragment.appendChild(empty);
+            } else {
+              for (const entry of results) {
+                fragment.appendChild(
+                  makeItemRow(entry.variable, 0, entry.leafName),
+                );
+              }
+            }
+          } else {
+            // Grouped tree view
+            renderNode(tree, fragment, 0);
+          }
+
+          list.replaceChildren(fragment);
+        }
+
+        function renderNode(node, container, depth) {
+          // Ungrouped items first (root level only at top)
+          for (const entry of node.items) {
+            container.appendChild(
+              makeItemRow(entry.variable, depth, entry.leafName),
+            );
+          }
+          // Groups (sorted)
+          for (const groupName of Object.keys(node.children).sort()) {
+            const child = node.children[groupName];
+
+            const groupHeader = document.createElement("div");
+            groupHeader.className = "var-picker-group-header";
+            groupHeader.dataset.depth = depth;
+
+            const chevron = document.createElement("span");
+            chevron.className = "var-picker-group-chevron";
+            chevron.textContent = "▾";
+
+            const label = document.createElement("span");
+            label.className = "var-picker-group-label";
+            label.textContent = groupName;
+
+            const count = document.createElement("span");
+            count.className = "var-picker-group-count";
+            count.textContent = child.count;
+
+            groupHeader.appendChild(chevron);
+            groupHeader.appendChild(label);
+            groupHeader.appendChild(count);
+
+            const groupBody = document.createElement("div");
+            groupBody.className = "var-picker-group-body";
+
+            renderNode(child, groupBody, depth + 1);
+
+            groupHeader.addEventListener("mousedown", (e) => {
+              e.preventDefault();
+              const collapsed = groupBody.classList.toggle("collapsed");
+              chevron.textContent = collapsed ? "▸" : "▾";
+            });
+
+            container.appendChild(groupHeader);
+            container.appendChild(groupBody);
+          }
+        }
+
+        function makeItemRow(v, depth, leafName) {
+          const row = document.createElement("div");
+          row.className =
+            "var-picker-item" +
+            (selectedVar && selectedVar.key === v.key ? " selected" : "");
+          row.dataset.depth = depth;
+
+          const check = document.createElement("span");
+          check.className = "var-picker-item-check";
+          check.textContent = "✓";
+
+          const name = document.createElement("span");
+          name.className = "var-picker-item-name";
+          name.textContent = leafName || v._leafName;
+          name.title = v.name;
+
+          row.appendChild(check);
+          row.appendChild(name);
+
+          row.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            select(v);
+          });
+          return row;
+        }
+
+        function select(v) {
+          selectedVar = v;
+          triggerText.textContent = v ? v.name : placeholder;
+          closeDropdown();
+          onChange(v);
+        }
+
+        // ── Open / close ─────────────────────────────────────────────────────────
+        let isOpen = false;
+        const scrollParent = document.querySelector("#main");
+
+        function handleOutsideMouseDown(e) {
+          if (!pickerWrap.contains(e.target) && !dropdown.contains(e.target)) {
+            closeDropdown();
+          }
+        }
+
+        function handleScrollClose() {
+          if (isOpen) closeDropdown();
+        }
+
+        function openDropdown() {
+          if (isOpen) return;
+          isOpen = true;
+
+          // Position dropdown relative to trigger
+          const rect = trigger.getBoundingClientRect();
+          const spaceBelow = window.innerHeight - rect.bottom;
+          const spaceAbove = rect.top;
+
+          dropdown.style.width = Math.max(rect.width, 220) + "px";
+          dropdown.style.left = rect.left + "px";
+
+          if (spaceBelow >= 200 || spaceBelow >= spaceAbove) {
+            dropdown.style.top = rect.bottom + 3 + "px";
+            dropdown.style.bottom = "auto";
+            dropdown.style.maxHeight = spaceBelow - 12 + "px";
+          } else {
+            dropdown.style.bottom = window.innerHeight - rect.top + 3 + "px";
+            dropdown.style.top = "auto";
+            dropdown.style.maxHeight = spaceAbove - 12 + "px";
+          }
+
+          // Attach to body to escape overflow:hidden clipping
+          document.body.appendChild(dropdown);
+          dropdown.classList.add("open");
+          trigger.classList.add("open");
+          renderList("");
+          searchInput.value = "";
+          searchInput.focus();
+
+          // Auto-scroll to selected item
+          requestAnimationFrame(() => {
+            const sel = dropdown.querySelector(".var-picker-item.selected");
+            if (sel) sel.scrollIntoView({ block: "nearest" });
+          });
+
+          document.addEventListener("mousedown", handleOutsideMouseDown);
+          if (scrollParent) {
+            scrollParent.addEventListener("scroll", handleScrollClose, {
+              passive: true,
+            });
+          }
+        }
+
+        function closeDropdown() {
+          if (!isOpen) return;
+          isOpen = false;
+          dropdown.classList.remove("open");
+          trigger.classList.remove("open");
+          // Re-attach to pickerWrap (so it travels with the card)
+          pickerWrap.appendChild(dropdown);
+
+          document.removeEventListener("mousedown", handleOutsideMouseDown);
+          if (scrollParent) {
+            scrollParent.removeEventListener("scroll", handleScrollClose);
+          }
+        }
+
+        trigger.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (isOpen) closeDropdown();
+          else openDropdown();
+        });
+
+        searchInput.addEventListener("input", () => {
+          renderList(searchInput.value.trim());
+        });
+
+        searchInput.addEventListener("click", (e) => e.stopPropagation());
+
+        // Initial render (hidden)
+        renderList("");
+
+        return pickerWrap;
+      }
+
+      function updateSummary() {
+        const totalCount = state.variables.length;
+        const mappingSummary = getMappingSummary();
+        const mappedCount = mappingSummary.mappedVariableCount;
+        const nodeMappedCount = mappingSummary.nodeMappedCount;
+        const brokenCount = state.brokenVariableCount || 0;
+        const hiddenLayerTotal = state.stats ? state.stats.hiddenLayerCount : 0;
+        const summaryEl = mainEl.querySelector(".summary-row");
+        if (summaryEl) {
+          summaryEl.innerHTML = `
+      <span class="stat-chip chip-total">${LINK_ICON} ${totalCount} variable${totalCount !== 1 ? "s" : ""} found</span>
+      ${state.scanInProgress ? `<span class="stat-chip chip-live"><span class="spinner spinner-compact"></span> Scanning…</span>` : ""}
+      ${mappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${mappedCount} variable${mappedCount !== 1 ? "s" : ""} ready</span>` : ""}
+      ${nodeMappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${nodeMappedCount} layer override${nodeMappedCount !== 1 ? "s" : ""}</span>` : ""}
+      ${hiddenLayerTotal > 0 ? `<span class="stat-chip chip-hidden" title="Hidden layers are included">${EYE_OFF_ICON} ${hiddenLayerTotal} hidden</span>` : ""}
+      ${brokenCount > 0 ? `<span class="stat-chip chip-broken">${brokenCount} broken</span>` : ""}
+    `;
+        }
+        const liveNoteEl = mainEl.querySelector(".scan-live-note");
+        if (liveNoteEl) {
+          const scanStatus = state.scanStatus || {};
+          const liveTotalNodes = scanStatus.totalNodes || 0;
+          const liveResolved = scanStatus.resolvedVariableCount || totalCount;
+          const liveDiscovered = scanStatus.discoveredCount || totalCount;
+          liveNoteEl.innerHTML = `<span class="spinner spinner-compact"></span><span><strong>Scanning…</strong> ${totalCount} variable${totalCount !== 1 ? "s are" : " is"} ready so far${liveTotalNodes > 0 ? ` across ${liveTotalNodes} node${liveTotalNodes !== 1 ? "s" : ""}` : ""}. ${liveResolved > 0 ? `${liveResolved} of ${liveDiscovered} variable reference${liveDiscovered !== 1 ? "s" : ""} resolved.` : "Results will appear here as they are discovered."} You can start mapping now; apply unlocks when the scan finishes.</span>`;
+        }
+      }
+
+      function updateRebindBtn() {
+        if (state.scanInProgress) {
+          rebindBtn.disabled = true;
+          return;
+        }
+        const mappingSummary = getMappingSummary();
+        rebindBtn.disabled =
+          mappingSummary.mappedVariableCount === 0 &&
+          mappingSummary.nodeMappedCount === 0;
+      }
+
+      function summarizeWarnings(errors) {
+        const counts = new Map();
+        (errors || []).forEach((error) => {
+          counts.set(error, (counts.get(error) || 0) + 1);
+        });
+        return Array.from(counts.entries())
+          .map(([message, count]) => ({ message, count }))
+          .sort(
+            (a, b) => b.count - a.count || a.message.localeCompare(b.message),
+          );
+      }
+
+      function renderResult(msg) {
+        mainEl.innerHTML = "";
+        scanBtn.disabled = false;
+        scanBtn.textContent = "Scan Again";
+        rebindBtn.style.display = "none";
+        rebindBtn.disabled = true;
+
+        const hasResults = msg.reboundCount > 0;
+        const panel = document.createElement("div");
+        panel.className =
+          "result-panel " + (hasResults ? "result-success" : "result-warn");
+
+        const iconSvg = hasResults ? STATUS_ICONS.success : STATUS_ICONS.warn;
+        const titleText = `${hasResults ? "Done! " : "Nothing remapped. "}${msg.reboundCount} binding${msg.reboundCount !== 1 ? "s" : ""} remapped`;
+
+        const titleDiv = document.createElement("div");
+        titleDiv.className = "result-title";
+        titleDiv.innerHTML = iconSvg + " " + escHtml(titleText);
+
+        const subDiv = document.createElement("div");
+        subDiv.className = "result-subtext";
+        const skippedNote =
+          msg.skippedCount > 0
+            ? ` — ${msg.skippedCount} binding${msg.skippedCount !== 1 ? "s" : ""} had no mapping configured`
+            : "";
+        subDiv.textContent = `Across ${msg.nodeCount} node${msg.nodeCount !== 1 ? "s" : ""}${skippedNote}.`;
+
+        panel.appendChild(titleDiv);
+        panel.appendChild(subDiv);
+
+        if (msg.errors && msg.errors.length > 0) {
+          const warningSummary =
+            Array.isArray(msg.warningSummary) && msg.warningSummary.length > 0
+              ? msg.warningSummary
+              : summarizeWarnings(msg.errors);
+          const errSection = document.createElement("div");
+          errSection.className = "result-errors";
+
+          const errHeader = document.createElement("div");
+          errHeader.className = "section-title result-warning-title";
+          errHeader.innerHTML =
+            STATUS_ICONS.warn + " Warnings (" + msg.errors.length + ")";
+          errSection.appendChild(errHeader);
+
+          warningSummary.slice(0, 10).forEach((warning) => {
+            const item = document.createElement("div");
+            item.className = "error-item";
+            item.textContent =
+              warning.count > 1
+                ? warning.message + " (" + warning.count + "x)"
+                : warning.message;
+            errSection.appendChild(item);
+          });
+          if (warningSummary.length > 10) {
+            const more = document.createElement("div");
+            more.className = "error-item";
+            more.textContent = `…and ${warningSummary.length - 10} more warning type${warningSummary.length - 10 !== 1 ? "s" : ""}`;
+            errSection.appendChild(more);
+          }
+          panel.appendChild(errSection);
+        }
+
+        mainEl.appendChild(panel);
+      }
+
+      // ── Utilities ─────────────────────────────────────────────────────────────────
+      function setLoading(on, label = "Scanning…") {
+        state.loading = on;
+        scanBtn.disabled = on;
+        if (on) {
+          scanBtn.innerHTML = '<span class="spinner"></span> ' + label;
+        } else {
+          scanBtn.textContent = state.scanned ? "Scan Again" : "Scan";
+        }
+      }
+
+      function showProgress(message, pct) {
+        progressBar.style.display = "block";
+        progressFill.style.width = (pct || 0) + "%";
+        progressMsg.textContent = message || "Working…";
+      }
+
+      function hideProgress() {
+        progressBar.style.display = "none";
+        progressFill.style.width = "0%";
+      }
+
+      parent.postMessage({ pluginMessage: { type: "load-preferences" } }, "*");
+
+      // Crosshair SVG — target/select icon used in layer rows and nav buttons
+      function makeCrosshair(size) {
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+        svg.setAttribute("width", size);
+        svg.setAttribute("height", size);
+        svg.setAttribute("viewBox", "0 0 12 12");
+        svg.setAttribute("fill", "none");
+        svg.style.pointerEvents = "none";
+        const circle = document.createElementNS(ns, "circle");
+        circle.setAttribute("cx", "6");
+        circle.setAttribute("cy", "6");
+        circle.setAttribute("r", "3");
+        circle.setAttribute("stroke", "currentColor");
+        circle.setAttribute("stroke-width", "1.3");
+        svg.appendChild(circle);
+        [
+          ["6", "0", "6", "3.5"],
+          ["6", "8.5", "6", "12"],
+          ["0", "6", "3.5", "6"],
+          ["8.5", "6", "12", "6"],
+        ].forEach(([x1, y1, x2, y2]) => {
+          const ln = document.createElementNS(ns, "line");
+          ln.setAttribute("x1", x1);
+          ln.setAttribute("y1", y1);
+          ln.setAttribute("x2", x2);
+          ln.setAttribute("y2", y2);
+          ln.setAttribute("stroke", "currentColor");
+          ln.setAttribute("stroke-width", "1.3");
+          ln.setAttribute("stroke-linecap", "round");
+          svg.appendChild(ln);
+        });
+        return svg;
+      }
+
+      // ── Status SVG icons ──────────────────────────────────────────────────────────
+      const LINK_ICON =
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;vertical-align:middle"><path fill-rule="evenodd" clip-rule="evenodd" d="M8.62594 9.41565L13.0486 4.72238C13.9195 3.79825 15.3746 3.75506 16.2987 4.62591C17.2229 5.49677 17.2661 6.9519 16.3952 7.87603L15.9507 8.34777L17.3655 9.76264L17.8508 9.24767C19.4791 7.51965 19.3984 4.79875 17.6704 3.17036C15.9424 1.54197 13.2215 1.62273 11.5931 3.35075L7.17039 8.04401C5.542 9.77203 5.62276 12.4929 7.35078 14.1213C9.01239 15.6871 11.5921 15.6726 13.2356 14.1328L11.8199 12.7171C10.9394 13.4954 9.59447 13.4876 8.72241 12.6658C7.79827 11.7949 7.75508 10.3398 8.62594 9.41565Z" style="fill:var(--text-muted)"/><path fill-rule="evenodd" clip-rule="evenodd" d="M14.3952 14.5844L9.97249 19.2776C9.10164 20.2018 7.64651 20.2449 6.72238 19.3741C5.79824 18.5032 5.75505 17.0481 6.62591 16.124L7.07045 15.6522L5.65565 14.2374L5.17036 14.7523C3.54197 16.4803 3.62274 19.2012 5.35075 20.8296C7.07876 22.458 9.79965 22.3773 11.428 20.6493L15.8507 15.956C17.4791 14.228 17.3984 11.5071 15.6703 9.87868C14.0087 8.31286 11.4291 8.32737 9.78547 9.86718L11.2012 11.2829C12.0817 10.5046 13.4266 10.5124 14.2987 11.3342C15.2228 12.2051 15.266 13.6602 14.3952 14.5844Z" style="fill:var(--text-muted)"/></svg>';
+      // Remap / arrow up-right icon
+      const REMAP_ICON =
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;pointer-events:none"><path d="M7 17L17 7M17 7H8M17 7V16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+      const EYE_OFF_ICON =
+        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;pointer-events:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+
+      const STATUS_ICONS = {
+        success:
+          '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><path d="M20 10C20 15.5211 15.5211 20 10 20C4.47895 20 0 15.5211 0 10C0 4.47895 4.47895 0 10 0C15.5211 0 20 4.47895 20 10Z" style="fill:var(--green)"/><path fill-rule="evenodd" clip-rule="evenodd" d="M14.8788 7.52864L8.96825 13.3786C8.77877 13.5681 8.51825 13.6786 8.2393 13.6786C7.96035 13.6786 7.71035 13.5681 7.51035 13.3786L5.11035 10.9997L6.56035 9.56022L8.2314 11.2207L13.4104 6.0918L14.8604 7.53127H14.8814L14.8788 7.52864Z" fill="white"/></svg>',
+        info: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><path d="M10 20C8.02219 20 6.08879 19.4135 4.4443 18.3147C2.79981 17.2159 1.51809 15.6541 0.761209 13.8268C0.00433284 11.9996 -0.1937 9.98891 0.192152 8.0491C0.578004 6.10929 1.53041 4.32746 2.92894 2.92894C4.32746 1.53041 6.10929 0.578004 8.0491 0.192152C9.98891 -0.1937 11.9996 0.00433284 13.8268 0.761209C15.6541 1.51809 17.2159 2.79981 18.3147 4.4443C19.4135 6.08879 20 8.02219 20 10C20 12.6522 18.9464 15.1957 17.0711 17.0711C15.1957 18.9464 12.6522 20 10 20Z" style="fill:var(--accent)"/><path d="M10.9999 8.99994H8.99994V13.9999H10.9999V8.99994Z" fill="white"/><path d="M9.99994 7.99994C10.5522 7.99994 10.9999 7.55223 10.9999 6.99994C10.9999 6.44766 10.5522 5.99994 9.99994 5.99994C9.44766 5.99994 8.99994 6.44766 8.99994 6.99994C8.99994 7.55223 9.44766 7.99994 9.99994 7.99994Z" fill="white"/></svg>',
+        warn: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><path d="M10 20C8.02219 20 6.08879 19.4135 4.4443 18.3147C2.79981 17.2159 1.51809 15.6541 0.761209 13.8268C0.00433284 11.9996 -0.1937 9.98891 0.192152 8.0491C0.578004 6.10929 1.53041 4.32746 2.92894 2.92894C4.32746 1.53041 6.10929 0.578004 8.0491 0.192152C9.98891 -0.1937 11.9996 0.00433284 13.8268 0.761209C15.6541 1.51809 17.2159 2.79981 18.3147 4.4443C19.4135 6.08879 20 8.02219 20 10C20 12.6522 18.9464 15.1957 17.0711 17.0711C15.1957 18.9464 12.6522 20 10 20Z" style="fill:var(--yellow)"/><path d="M10.9999 10.9999H8.99994V5.99994H10.9999V10.9999Z" fill="black"/><path d="M9.99994 11.9999C10.5522 11.9999 10.9999 12.4477 10.9999 12.9999C10.9999 13.5522 10.5522 13.9999 9.99994 13.9999C9.44766 13.9999 8.99994 13.5522 8.99994 12.9999C8.99994 12.4477 9.44766 11.9999 9.99994 11.9999Z" fill="black"/></svg>',
+        error:
+          '<svg width="20" height="18" viewBox="0 0 20 18" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;margin-top:1px"><path d="M19.8615 16.4397L10.8656 0.516648C10.6754 0.17566 10.3352 0 9.995 0C9.65477 0 9.32455 0.17566 9.12442 0.516648L0.138463 16.4397C-0.251795 17.132 0.228523 18 1.00904 18H18.991C19.7715 18 20.2518 17.132 19.8615 16.4397ZM9.95497 14.9828C9.40461 14.9828 8.95431 14.5178 8.95431 13.9495C8.95431 13.3812 9.40461 12.9162 9.95497 12.9162C10.5053 12.9162 10.9556 13.3812 10.9556 13.9495C10.9556 14.5178 10.5053 14.9828 9.95497 14.9828ZM10.9556 11.8829H8.95431V6.71642H10.9556V11.8829Z" style="fill:var(--red)"/></svg>',
+      };
+
+      function showBanner(text, type = "info") {
+        state.banner = { text, type };
+        if (!state.scanned) {
+          const existing = mainEl.querySelector(".banner");
+          if (existing) existing.remove();
+          const icon = STATUS_ICONS[type] || STATUS_ICONS.info;
+          const div = document.createElement("div");
+          div.className = `banner banner-${type}`;
+          div.innerHTML = icon + " <span>" + escHtml(text) + "</span>";
+          mainEl.insertBefore(div, mainEl.firstChild);
+          return;
+        }
+        renderMain();
+      }
+
+      function escHtml(str) {
+        if (!str) return "";
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+    </script>
+
+    <div id="resize-handle">
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <line
+          x1="15"
+          y1="5"
+          x2="5"
+          y2="15"
+          stroke="#979AA3"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        />
+        <line
+          x1="15"
+          y1="9"
+          x2="9"
+          y2="15"
+          stroke="#979AA3"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        />
+        <line
+          x1="15"
+          y1="13"
+          x2="13"
+          y2="15"
+          stroke="#979AA3"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        />
+      </svg>
+    </div>
+
+    <script>
+      (function () {
+        const handle = document.getElementById("resize-handle");
+        const MIN_W = 360,
+          MIN_H = 400;
+        const MAX_W = 800,
+          MAX_H = 1000;
+        let dragging = false,
+          startX,
+          startY,
+          startW,
+          startH;
+
+        handle.addEventListener("mousedown", (e) => {
+          dragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          startW = document.documentElement.offsetWidth;
+          startH = document.documentElement.offsetHeight;
+          e.preventDefault();
+        });
+
+        document.addEventListener("mousemove", (e) => {
+          if (!dragging) return;
+          const w = Math.min(
+            MAX_W,
+            Math.max(MIN_W, startW + (e.clientX - startX)),
+          );
+          const h = Math.min(
+            MAX_H,
+            Math.max(MIN_H, startH + (e.clientY - startY)),
+          );
+          parent.postMessage(
+            {
+              pluginMessage: {
+                type: "resize",
+                width: Math.round(w),
+                height: Math.round(h),
+              },
+            },
+            "*",
+          );
+        });
+
+        document.addEventListener("mouseup", () => {
+          dragging = false;
+        });
+      })();
+    </script>
+  </body>
+</html>
