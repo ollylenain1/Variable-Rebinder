@@ -1,0 +1,43 @@
+✨ Blueprint: Variable Mapper — Update
+
+This update focuses on performance, reliability, and more accurate variable detection across complex files.
+
+🚀 Performance Improvements
+
+* Massive file support: Introduced chunked node scanning to prevent timeouts on large documents
+* Smoother processing: Yields between batches to keep Figma responsive during long scans
+* Concurrent loading: Optimized loadAsync() with capped concurrency to avoid memory spikes
+* Live progress feedback: UI now updates in real-time while scanning
+
+🔍 More Accurate Scanning
+
+* Hidden layers included: Variables are now detected even in hidden content
+* Instance-aware scanning: Correctly captures variables inside instances and nested structures
+* Segment-level text support: Detects variables applied to partial text ranges (e.g. links within text)
+* Improved variable resolution: Multi-step fallback ensures better matching across libraries
+
+🧠 Smarter Variable Handling
+
+* Broken variables surfaced: Missing or detached variables are now clearly identified
+* Deduplication improvements: Variables with identical name + collection are consolidated
+* Better mapping logic: More reliable remapping across collections and libraries
+* Bulk remap by collection: Quickly remap entire sets of variables at once
+
+🛠 Fixes
+
+* Fixed issue where instance overrides were not fully applied (now includes the originating node)
+* Fixed cases where selection-based remapping would fail silently
+* Fixed inconsistencies with text variables not applying across mixed styles
+* Improved handling of edge cases in variable bindings
+
+🎛 UX Improvements
+
+* Clearer scan progress and stats (nodes scanned, variables found, etc.)
+* Better handling of large result sets in the UI
+* Persistent UI preferences (scope, theme, recent collections)
+
+⸻
+
+⚡ Summary
+
+This version makes the plugin significantly more robust for real-world design systems—especially large files, complex components, and mixed text styles—while giving much better visibility into what’s happening under the hood.
