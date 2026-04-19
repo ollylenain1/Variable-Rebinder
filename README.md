@@ -1,6 +1,6 @@
 # Blueprint: Variable Rebinder — Figma Plugin
 
-A Figma plugin that scans your design for bound variables and lets you remap them to the correct library. Useful when:
+A Figma plugin that scans your design for bound variables and lets you remap them to the correct library or collection. Useful when:
 
 - You've duplicated a file and variables are pointing to the wrong library
 - You're migrating from one design system to another
@@ -30,7 +30,19 @@ blueprint-variable-rebinder/
 
 ---
 
-## How to Use
+## What It Does
+
+- Scans **Selection**, **Current Page**, or **Whole File**
+- Finds bound variables across colors, numbers, booleans, strings, text properties, layout properties, and more
+- Includes **hidden layers** in both scan and remap operations
+- Detects **broken / unresolved variable references** and shows them separately
+- Supports **bulk remap by source library**
+- Supports text layers with **mixed text fill bindings**, including range-based fill variables
+- Imports target library variables automatically before applying remaps
+
+---
+
+## How To Use
 
 ### 1. Choose your scope
 
@@ -38,7 +50,7 @@ Select from **Selection**, **Current Page**, or **Whole File** at the top of the
 
 ### 2. Scan
 
-Click **Scan** to discover all bound variables in scope. The plugin lists each variable with its current collection/library source.
+Click **Scan** to discover all bound variables in scope. The plugin lists each variable with its current collection or library source, along with usage counts and hidden-layer stats where relevant.
 
 ### 3. Map variables
 
@@ -49,9 +61,22 @@ For each found variable, expand its card and:
 
 Green dot = mapped ✓
 
-### 4. Apply
+### 4. Optional: bulk remap by library
 
-Click **Apply Remapping**. Use the **Dry Run** toggle to preview what would change without committing.
+Use **Bulk Remap by Library** to map every variable from one source library or collection to matching variables in a target collection, then fine-tune any exceptions manually.
+
+### 5. Apply
+
+Click **Apply Remapping** to write the new bindings back to the file.
+
+---
+
+## Notes On Behavior
+
+- The plugin scans hidden layers; hidden content is not skipped
+- Instance children are detected and included where possible, but some bindings inside instances can only be changed if that property already has an override
+- For text layers, range-based color variable bindings are handled through text segment fills
+- When the plugin can identify layers using a variable, the UI can show those usages and focus them in the document
 
 ---
 
@@ -59,9 +84,11 @@ Click **Apply Remapping**. Use the **Dry Run** toggle to preview what would chan
 
 - Uses `figma.variables.importVariableByKeyAsync` to import library variables before binding
 - Uses `figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync` to list all connected libraries
-- Uses `setBoundVariable` on each matching node
+- Uses `setBoundVariable` for standard bindable fields
+- Uses `setBoundVariableForPaint` and text range fill updates for paint and mixed-text fill rebinding
 - Handles all bindable fields: fills, strokes, opacity, corner radius, width/height, text properties, etc.
 - Works with COLOR, FLOAT, STRING, and BOOLEAN variable types
+- Walks nodes in chunks and loads nodes concurrently to avoid timeouts on large files
 
 ---
 
@@ -69,4 +96,5 @@ Click **Apply Remapping**. Use the **Dry Run** toggle to preview what would chan
 
 - Requires a Figma account with access to the target libraries
 - Library variables must be in connected (shared) libraries visible in the file
-- Text range variables (`setRangeBoundVariable`) require the full node to be re-bound
+- Some instance-child bindings cannot be changed unless that property is already exposed as an override on the instance
+- Broken variable references can be reported, but they may not always be recoverable automatically if the source library is missing
