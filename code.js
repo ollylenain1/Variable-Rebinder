@@ -171,6 +171,13 @@ function collectNodesForScan(roots) {
 
 function collectNodesForRebind(roots, includeHidden) {
   const nodes = [];
+  const seenNodeIds = new Set();
+
+  const addNode = (node) => {
+    if (!node || seenNodeIds.has(node.id)) return;
+    seenNodeIds.add(node.id);
+    nodes.push(node);
+  };
 
   roots.forEach((root) => {
     const stack = [{ node: root, hasHiddenAncestor: false }];
@@ -181,7 +188,7 @@ function collectNodesForRebind(roots, includeHidden) {
       const isHidden = current.hasHiddenAncestor || selfHidden;
 
       if (includeHidden !== false || !isHidden) {
-        nodes.push(node);
+        addNode(node);
       }
 
       if ("children" in node) {
@@ -555,6 +562,17 @@ function didTextSegmentVariableApply(node, start, end, index, expectedId) {
   }
 
   return false;
+}
+
+function getApplyFailureField(field, segmentRange) {
+  if (
+    segmentRange &&
+    typeof segmentRange.start === "number" &&
+    typeof segmentRange.end === "number"
+  ) {
+    return `${field}[${segmentRange.start}-${segmentRange.end}]`;
+  }
+  return field;
 }
 
 /**
@@ -1620,11 +1638,57 @@ async function handleRebind({
       pct: 0,
     });
 
+    const selectionIdsForScope =
+      scope === "selection"
+        ? cachedSelectionIds && cachedSelectionIds.length > 0
+          ? cachedSelectionIds
+          : figma.currentPage.selection.map((n) => n.id)
+        : [];
+
     const roots = (await getRoots(scope, cachedSelectionIds)) || [];
     const nodesToProcess = collectNodesForRebind(roots, includeHidden);
     const nodeById = {};
     for (const node of nodesToProcess) {
       nodeById[node.id] = node;
+    }
+
+    const ensureSelectedNodesIncluded = async (selectionIds) => {
+      if (!Array.isArray(selectionIds) || selectionIds.length === 0) return;
+      const missingSelectionIds = selectionIds.filter((id) => !nodeById[id]);
+      if (missingSelectionIds.length === 0) return;
+
+      await pMap(
+        missingSelectionIds,
+        async (id) => {
+          try {
+            const node = await figma.getNodeByIdAsync(id);
+            if (!node || nodeById[id]) return;
+            if (typeof node.loadAsync === "function") {
+              await node.loadAsync();
+            }
+            nodeById[id] = node;
+            nodesToProcess.push(node);
+          } catch (err) {
+            debugWarn(
+              "rebind: could not explicitly include selected node:",
+              err,
+            );
+          }
+        },
+        LOAD_CONCURRENCY,
+      );
+    };
+
+    if (scope === "selection") {
+      if (nodesToProcess.length === 0 && selectionIdsForScope.length > 0) {
+        debugWarn(
+          "rebind selection scope collected 0 nodes; falling back to explicit selection ID resolution",
+        );
+      }
+      await ensureSelectedNodesIncluded(selectionIdsForScope);
+      debugWarn(
+        `rebind selection scope collected ${nodesToProcess.length} node(s); selected node present=${selectionIdsForScope.some((id) => !!nodeById[id])}`,
+      );
     }
 
     // Supplement nodeById with any instance-child nodes recorded during scan
@@ -1655,6 +1719,12 @@ async function handleRebind({
           LOAD_CONCURRENCY,
         );
       }
+    }
+
+    if (scope === "selection") {
+      debugWarn(
+        `rebind selection scope final node count=${nodesToProcess.length}; selected IDs present=${selectionIdsForScope.filter((id) => !!nodeById[id]).length}/${selectionIdsForScope.length}`,
+      );
     }
 
     figma.ui.postMessage({
@@ -1691,6 +1761,8 @@ async function handleRebind({
     const MAX_DISTINCT_ERRORS = 200;
     const variableErrorsById = {};
     const updatedVariableIds = new Set();
+    const applyFailures = [];
+    const applyFailureKeys = new Set();
 
     const addVariableError = (variableId, message) => {
       if (!variableId || !message) return;
@@ -1726,6 +1798,110 @@ async function handleRebind({
     const recordVariableError = (variableId, message) => {
       recordError(message);
       addVariableError(variableId, message);
+    };
+
+    const recordApplyFailure = ({
+      sourceVariableId,
+      node,
+      field,
+      variableId,
+      segmentRange = null,
+    }) => {
+      const nodeId = node && node.id ? node.id : "unknown-node";
+      const nodeName = node && node.name ? node.name : "Unknown node";
+      const failureField = getApplyFailureField(field, segmentRange);
+      const dedupeKey = `${nodeId}|${failureField}|${variableId}`;
+      if (!applyFailureKeys.has(dedupeKey)) {
+        applyFailureKeys.add(dedupeKey);
+        applyFailures.push({
+          nodeId,
+          nodeName,
+          field: failureField,
+          variableId,
+          reason: "apply_failed",
+        });
+      }
+      recordVariableError(
+        sourceVariableId || variableId,
+        `Node "${nodeName}" field "${failureField}": failed to apply variable "${variableId}" after verification retry.`,
+      );
+      return false;
+    };
+
+    const verifyVariableApplication = async ({
+      node,
+      field,
+      variableId,
+      sourceVariableId,
+      segmentRange = null,
+      verify,
+      retryApply,
+    }) => {
+      let applied = false;
+      try {
+        applied = !!(await verify());
+      } catch (err) {
+        recordVariableError(
+          sourceVariableId || variableId,
+          `Node "${node && node.name ? node.name : "Unknown node"}" field "${getApplyFailureField(field, segmentRange)}": verification failed: ${String(err)}`,
+        );
+      }
+      if (applied) return true;
+
+      if (node && typeof node.loadAsync === "function") {
+        try {
+          await node.loadAsync();
+        } catch (err) {
+          recordVariableError(
+            sourceVariableId || variableId,
+            `Node "${node.name}" field "${getApplyFailureField(field, segmentRange)}": retry load failed: ${String(err)}`,
+          );
+        }
+      } else if (!node) {
+        try {
+          await figma.loadAllPagesAsync();
+        } catch (err) {
+          recordVariableError(
+            sourceVariableId || variableId,
+            `Node lookup failed for field "${getApplyFailureField(field, segmentRange)}": ${String(err)}`,
+          );
+        }
+      }
+
+      try {
+        await retryApply();
+      } catch (err) {
+        recordVariableError(
+          sourceVariableId || variableId,
+          `Node "${node && node.name ? node.name : "Unknown node"}" field "${getApplyFailureField(field, segmentRange)}": retry apply failed: ${String(err)}`,
+        );
+        return recordApplyFailure({
+          sourceVariableId,
+          node,
+          field,
+          variableId,
+          segmentRange,
+        });
+      }
+
+      try {
+        applied = !!(await verify());
+      } catch (err) {
+        recordVariableError(
+          sourceVariableId || variableId,
+          `Node "${node && node.name ? node.name : "Unknown node"}" field "${getApplyFailureField(field, segmentRange)}": retry verification failed: ${String(err)}`,
+        );
+      }
+
+      if (applied) return true;
+
+      return recordApplyFailure({
+        sourceVariableId,
+        node,
+        field,
+        variableId,
+        segmentRange,
+      });
     };
 
     // Build deduplicated toKey → { isLocal, localId } map
@@ -2097,6 +2273,7 @@ async function handleRebind({
             for (const seg of segments) {
               const paints = Array.isArray(seg.fills) ? [...seg.fills] : [];
               let segmentChanged = false;
+              const verifiedEntries = [];
 
               for (let i = 0; i < paints.length; i++) {
                 const paint = paints[i];
@@ -2126,22 +2303,91 @@ async function handleRebind({
                   matchedEntry.targetVariable,
                 );
                 segmentChanged = true;
-                appliedEntryIds.add(alias.id);
-                if (canonicalAliasId) appliedEntryIds.add(canonicalAliasId);
-                if (matchedEntry.id || matchedEntry.rawId) {
-                  appliedEntryIds.add(matchedEntry.id || matchedEntry.rawId);
-                  updatedVariableIds.add(matchedEntry.id || matchedEntry.rawId);
-                }
-                updatedVariableIds.add(canonicalAliasId || alias.id);
+                verifiedEntries.push({
+                  entry: matchedEntry,
+                  aliasId: alias.id,
+                  canonicalAliasId,
+                  paintIndex: i,
+                });
               }
 
               if (!segmentChanged) continue;
 
               try {
                 node.setRangeFills(seg.start, seg.end, paints);
-                nodeChanged = true;
               } catch (err) {
-                console.warn("Failed to apply segment:", seg, err);
+                recordVariableError(
+                  verifiedEntries[0] &&
+                    (verifiedEntries[0].entry.id ||
+                      verifiedEntries[0].entry.rawId),
+                  `Node "${node.name}" field "${getApplyFailureField("fills", {
+                    start: seg.start,
+                    end: seg.end,
+                  })}": ${String(err)}`,
+                );
+                continue;
+              }
+
+              for (const {
+                entry: verifiedEntry,
+                aliasId,
+                canonicalAliasId,
+                paintIndex,
+              } of verifiedEntries) {
+                const applied = await verifyVariableApplication({
+                  node,
+                  field: "fills",
+                  variableId: verifiedEntry.targetVariable.id,
+                  sourceVariableId: verifiedEntry.id || verifiedEntry.rawId,
+                  segmentRange: { start: seg.start, end: seg.end },
+                  verify: () =>
+                    didTextSegmentVariableApply(
+                      node,
+                      seg.start,
+                      seg.end,
+                      paintIndex,
+                      verifiedEntry.targetVariable.id,
+                    ),
+                  retryApply: async () => {
+                    const retrySegments =
+                      typeof node.getStyledTextSegments === "function"
+                        ? node.getStyledTextSegments(["fills"])
+                        : [];
+                    for (const retrySeg of retrySegments) {
+                      if (
+                        retrySeg.start !== seg.start ||
+                        retrySeg.end !== seg.end
+                      ) {
+                        continue;
+                      }
+                      const retryPaints = Array.isArray(retrySeg.fills)
+                        ? [...retrySeg.fills]
+                        : [];
+                      if (!retryPaints[paintIndex]) continue;
+                      retryPaints[paintIndex] =
+                        figma.variables.setBoundVariableForPaint(
+                          retryPaints[paintIndex],
+                          "color",
+                          verifiedEntry.targetVariable,
+                        );
+                      node.setRangeFills(
+                        retrySeg.start,
+                        retrySeg.end,
+                        retryPaints,
+                      );
+                      return;
+                    }
+                  },
+                });
+                if (!applied) continue;
+                nodeChanged = true;
+                appliedEntryIds.add(aliasId);
+                if (canonicalAliasId) appliedEntryIds.add(canonicalAliasId);
+                if (verifiedEntry.id || verifiedEntry.rawId) {
+                  appliedEntryIds.add(verifiedEntry.id || verifiedEntry.rawId);
+                  updatedVariableIds.add(verifiedEntry.id || verifiedEntry.rawId);
+                }
+                updatedVariableIds.add(canonicalAliasId || aliasId);
               }
             }
 
@@ -2149,10 +2395,11 @@ async function handleRebind({
               reboundCount += appliedEntryIds.size;
             }
 
-            const updatedSegments = node.getStyledTextSegments(["fills"]);
-            console.log("Updated segments:", updatedSegments);
           } catch (err) {
-            console.warn("Segment remap failed:", err);
+            recordVariableError(
+              fillEntries[0] && (fillEntries[0].id || fillEntries[0].rawId),
+              `Node "${node.name}" field "fills": ${String(err)}`,
+            );
           }
         } else if (nodeLevelEntries.length > 0) {
           let paints = Array.isArray(node.fills) ? [...node.fills] : [];
@@ -2161,13 +2408,18 @@ async function handleRebind({
           for (const entry of nodeLevelEntries) {
             if (instance) {
               node.setBoundVariable("fills", entry.targetVariable);
-              if (!didVariableApply(node, "fills", entry.targetVariable.id)) {
-                console.warn("Variable NOT applied (likely instance issue):", {
-                  nodeId: node.id,
-                  field: entry.field,
-                  attempted: entry.targetVariable.id,
-                });
-                console.warn("Retrying on instance root:", instance.id);
+              const applied = await verifyVariableApplication({
+                node,
+                field: "fills",
+                variableId: entry.targetVariable.id,
+                sourceVariableId: entry.id || entry.rawId,
+                verify: () =>
+                  didVariableApply(node, "fills", entry.targetVariable.id),
+                retryApply: async () => {
+                  node.setBoundVariable("fills", entry.targetVariable);
+                },
+              });
+              if (!applied) {
                 continue;
               }
               reboundCount++;
@@ -2186,25 +2438,38 @@ async function handleRebind({
               entry.targetVariable,
             );
             fillsChanged = true;
-            reboundCount++;
-            nodeChanged = true;
-            if (entry.id || entry.rawId) {
-              updatedVariableIds.add(entry.id || entry.rawId);
-            }
           }
 
           if (fillsChanged) {
             node.fills = paints;
-            const expectedIds = nodeLevelEntries
-              .map((entry) => entry.targetVariable && entry.targetVariable.id)
-              .filter(Boolean);
-            for (const expectedId of expectedIds) {
-              if (!didVariableApply(node, "fills", expectedId)) {
-                console.warn("Variable NOT applied (likely instance issue):", {
-                  nodeId: node.id,
-                  field: "fills",
-                  attempted: expectedId,
-                });
+            for (const entry of nodeLevelEntries) {
+              const paintIndex = entry.index !== null ? entry.index : 0;
+              const applied = await verifyVariableApplication({
+                node,
+                field: "fills",
+                variableId: entry.targetVariable.id,
+                sourceVariableId: entry.id || entry.rawId,
+                verify: () =>
+                  didVariableApply(node, "fills", entry.targetVariable.id),
+                retryApply: async () => {
+                  const retryPaints = Array.isArray(node.fills)
+                    ? [...node.fills]
+                    : [];
+                  if (!retryPaints[paintIndex]) return;
+                  retryPaints[paintIndex] =
+                    figma.variables.setBoundVariableForPaint(
+                      retryPaints[paintIndex],
+                      "color",
+                      entry.targetVariable,
+                    );
+                  node.fills = retryPaints;
+                },
+              });
+              if (!applied) continue;
+              reboundCount++;
+              nodeChanged = true;
+              if (entry.id || entry.rawId) {
+                updatedVariableIds.add(entry.id || entry.rawId);
               }
             }
           }
@@ -2220,43 +2485,64 @@ async function handleRebind({
                   ? node.getStyledTextSegments(["fills"])
                   : [];
               let segApplied = false;
-              for (const seg of segments) {
-                if (seg.start !== start || seg.end !== end) continue;
-                const paints = Array.isArray(seg.fills) ? [...seg.fills] : [];
-                const paintIndex = entry.index !== null ? entry.index : 0;
-                if (!paints[paintIndex]) continue;
-                paints[paintIndex] = figma.variables.setBoundVariableForPaint(
-                  paints[paintIndex],
-                  "color",
-                  entry.targetVariable,
+            for (const seg of segments) {
+              if (seg.start !== start || seg.end !== end) continue;
+              const paints = Array.isArray(seg.fills) ? [...seg.fills] : [];
+              const paintIndex = entry.index !== null ? entry.index : 0;
+              if (!paints[paintIndex]) continue;
+              paints[paintIndex] = figma.variables.setBoundVariableForPaint(
+                paints[paintIndex],
+                "color",
+                entry.targetVariable,
+              );
+              try {
+                node.setRangeFills(start, end, paints);
+              } catch (err) {
+                recordVariableError(
+                  entry.id || entry.rawId,
+                  `Node "${node.name}" field "${getApplyFailureField(entry.field, entry.segmentRange)}": ${String(err)}`,
                 );
-                try {
-                  node.setRangeFills(start, end, paints);
-                } catch (err) {
-                  console.warn("Segment override failed:", err);
-                  continue;
-                }
-                if (
-                  !didTextSegmentVariableApply(
+                continue;
+              }
+              const applied = await verifyVariableApplication({
+                node,
+                field: entry.field,
+                variableId: entry.targetVariable.id,
+                sourceVariableId: entry.id || entry.rawId,
+                segmentRange: entry.segmentRange,
+                verify: () =>
+                  didTextSegmentVariableApply(
                     node,
                     start,
                     end,
                     paintIndex,
                     entry.targetVariable.id,
-                  )
-                ) {
-                  console.warn("Variable NOT applied (likely instance issue):", {
-                    nodeId: node.id,
-                    field: entry.field,
-                    attempted: entry.targetVariable.id,
-                  });
-                  if (instance) {
-                    console.warn("Retrying on instance root:", instance.id);
+                  ),
+                retryApply: async () => {
+                  const retrySegments =
+                    typeof node.getStyledTextSegments === "function"
+                      ? node.getStyledTextSegments(["fills"])
+                      : [];
+                  for (const retrySeg of retrySegments) {
+                    if (retrySeg.start !== start || retrySeg.end !== end) continue;
+                    const retryPaints = Array.isArray(retrySeg.fills)
+                      ? [...retrySeg.fills]
+                      : [];
+                    if (!retryPaints[paintIndex]) continue;
+                    retryPaints[paintIndex] =
+                      figma.variables.setBoundVariableForPaint(
+                        retryPaints[paintIndex],
+                        "color",
+                        entry.targetVariable,
+                      );
+                    node.setRangeFills(start, end, retryPaints);
+                    return;
                   }
-                  continue;
-                }
-                segApplied = true;
-              }
+                },
+              });
+              if (!applied) continue;
+              segApplied = true;
+            }
               if (segApplied) {
                 reboundCount++;
                 nodeChanged = true;
@@ -2276,7 +2562,10 @@ async function handleRebind({
                 );
               }
             } catch (err) {
-              console.warn("Segment remap failed:", err);
+              recordVariableError(
+                entry.id || entry.rawId,
+                `Node "${node.name}" field "${getApplyFailureField(entry.field, entry.segmentRange)}": ${String(err)}`,
+              );
             }
           }
         }
@@ -2304,13 +2593,18 @@ async function handleRebind({
             if (PAINT_FIELDS.has(field)) {
               if (instance) {
                 node.setBoundVariable(field, targetVariable);
-                if (!didVariableApply(node, field, targetVariable.id)) {
-                  console.warn("Variable NOT applied (likely instance issue):", {
-                    nodeId: node.id,
-                    field,
-                    attempted: targetVariable.id,
-                  });
-                  console.warn("Retrying on instance root:", instance.id);
+                const applied = await verifyVariableApplication({
+                  node,
+                  field,
+                  variableId: targetVariable.id,
+                  sourceVariableId: id || rawId,
+                  verify: () =>
+                    didVariableApply(node, field, targetVariable.id),
+                  retryApply: async () => {
+                    node.setBoundVariable(field, targetVariable);
+                  },
+                });
+                if (!applied) {
                   continue;
                 }
                 reboundCount++;
@@ -2369,6 +2663,52 @@ async function handleRebind({
                   if (field === "fills")
                     node.setRangeFills(seg.start, seg.end, newPaints);
                   else node.setRangeStrokes(seg.start, seg.end, newPaints);
+                  const applied = await verifyVariableApplication({
+                    node,
+                    field,
+                    variableId: targetVariable.id,
+                    sourceVariableId: id || rawId,
+                    segmentRange: { start: seg.start, end: seg.end },
+                    verify: () =>
+                      didTextSegmentVariableApply(
+                        node,
+                        seg.start,
+                        seg.end,
+                        paintIdx,
+                        targetVariable.id,
+                      ),
+                    retryApply: async () => {
+                      const retrySegments =
+                        typeof node.getStyledTextSegments === "function"
+                          ? node.getStyledTextSegments(["fills"])
+                          : [];
+                      for (const retrySeg of retrySegments) {
+                        if (
+                          retrySeg.start !== seg.start ||
+                          retrySeg.end !== seg.end
+                        ) {
+                          continue;
+                        }
+                        const retryPaints = Array.isArray(retrySeg[field])
+                          ? [...retrySeg[field]]
+                          : [];
+                        if (!retryPaints[paintIdx]) continue;
+                        retryPaints[paintIdx] =
+                          figma.variables.setBoundVariableForPaint(
+                            retryPaints[paintIdx],
+                            "color",
+                            targetVariable,
+                          );
+                        node.setRangeFills(
+                          retrySeg.start,
+                          retrySeg.end,
+                          retryPaints,
+                        );
+                        return;
+                      }
+                    },
+                  });
+                  if (!applied) continue;
                   segApplied = true;
                 }
                 if (segApplied) {
@@ -2433,9 +2773,61 @@ async function handleRebind({
                     try {
                       node.setRangeFills(seg.start, seg.end, newPaints);
                     } catch (err) {
-                      console.warn("Segment override failed:", err);
+                      recordVariableError(
+                        id || rawId,
+                        `Node "${node.name}" field "${getApplyFailureField(field, {
+                          start: seg.start,
+                          end: seg.end,
+                        })}": ${String(err)}`,
+                      );
                       continue;
                     }
+                    const applied = await verifyVariableApplication({
+                      node,
+                      field,
+                      variableId: targetVariable.id,
+                      sourceVariableId: id || rawId,
+                      segmentRange: { start: seg.start, end: seg.end },
+                      verify: () =>
+                        didTextSegmentVariableApply(
+                          node,
+                          seg.start,
+                          seg.end,
+                          paintIdx,
+                          targetVariable.id,
+                        ),
+                      retryApply: async () => {
+                        const retrySegments =
+                          typeof node.getStyledTextSegments === "function"
+                            ? node.getStyledTextSegments(["fills"])
+                            : [];
+                        for (const retrySeg of retrySegments) {
+                          if (
+                            retrySeg.start !== seg.start ||
+                            retrySeg.end !== seg.end
+                          ) {
+                            continue;
+                          }
+                          const retryPaints = Array.isArray(retrySeg.fills)
+                            ? [...retrySeg.fills]
+                            : [];
+                          if (!retryPaints[paintIdx]) continue;
+                          retryPaints[paintIdx] =
+                            figma.variables.setBoundVariableForPaint(
+                              retryPaints[paintIdx],
+                              "color",
+                              targetVariable,
+                            );
+                          node.setRangeFills(
+                            retrySeg.start,
+                            retrySeg.end,
+                            retryPaints,
+                          );
+                          return;
+                        }
+                      },
+                    });
+                    if (!applied) continue;
                     segmentRebound = true;
                   }
                   if (segmentRebound) {
@@ -2468,6 +2860,28 @@ async function handleRebind({
                           targetVariable,
                         );
                       node[field] = paints;
+                      const applied = await verifyVariableApplication({
+                        node,
+                        field,
+                        variableId: targetVariable.id,
+                        sourceVariableId: id || rawId,
+                        verify: () =>
+                          didVariableApply(node, field, targetVariable.id),
+                        retryApply: async () => {
+                          const retryPaints = Array.isArray(node[field])
+                            ? [...node[field]]
+                            : [];
+                          if (!retryPaints[paintIdx]) return;
+                          retryPaints[paintIdx] =
+                            figma.variables.setBoundVariableForPaint(
+                              retryPaints[paintIdx],
+                              "color",
+                              targetVariable,
+                            );
+                          node[field] = retryPaints;
+                        },
+                      });
+                      if (!applied) continue;
                       reboundCount++;
                       nodeChanged = true;
                       if (id || rawId) updatedVariableIds.add(id || rawId);
@@ -2513,35 +2927,44 @@ async function handleRebind({
                 targetVariable,
               );
               node[field] = paints;
-              if (!didVariableApply(node, field, targetVariable.id)) {
-                console.warn("Variable NOT applied (likely instance issue):", {
-                  nodeId: node.id,
-                  field,
-                  attempted: targetVariable.id,
-                });
-                if (instance) {
-                  console.warn("Retrying on instance root:", instance.id);
-                }
+              const applied = await verifyVariableApplication({
+                node,
+                field,
+                variableId: targetVariable.id,
+                sourceVariableId: id || rawId,
+                verify: () =>
+                  didVariableApply(node, field, targetVariable.id),
+                retryApply: async () => {
+                  const retryPaints = Array.isArray(node[field])
+                    ? [...node[field]]
+                    : [];
+                  if (!retryPaints[paintIndex]) return;
+                  retryPaints[paintIndex] =
+                    figma.variables.setBoundVariableForPaint(
+                      retryPaints[paintIndex],
+                      "color",
+                      targetVariable,
+                    );
+                  node[field] = retryPaints;
+                },
+              });
+              if (!applied) {
                 continue;
               }
             } else {
               node.setBoundVariable(field, targetVariable);
-              if (!didVariableApply(node, field, targetVariable.id)) {
-                console.warn("Variable NOT applied (likely instance issue):", {
-                  nodeId: node.id,
-                  field,
-                  attempted: targetVariable.id,
-                });
-                if (instance) {
-                  console.warn("Retrying on instance root:", instance.id);
-                }
-                recordVariableError(
-                  id || rawId,
-                  `Node "${node.name}" (${node.type}) field "${field}": ` +
-                    `instance override not applied — this property has no override ` +
-                    `set on the instance. Enable an override on this property first, ` +
-                    `or remap the main component instead.`,
-                );
+              const applied = await verifyVariableApplication({
+                node,
+                field,
+                variableId: targetVariable.id,
+                sourceVariableId: id || rawId,
+                verify: () =>
+                  didVariableApply(node, field, targetVariable.id),
+                retryApply: async () => {
+                  node.setBoundVariable(field, targetVariable);
+                },
+              });
+              if (!applied) {
                 continue;
               }
             }
@@ -2612,6 +3035,8 @@ async function handleRebind({
           ),
         ),
       ).length,
+      applyFailures,
+      applyFailureCount: applyFailures.length,
       variableErrorsById,
       errors,
       warningSummary,

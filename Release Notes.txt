@@ -1,43 +1,28 @@
-✨ Blueprint: Variable Mapper — Update
+Blueprint: Variable Rebinder — Community Update
 
-This update focuses on performance, reliability, and more accurate variable detection across complex files.
+This release is focused on reliability, clearer apply results, and better handling of tricky real-world files.
 
-🚀 Performance Improvements
+What’s new
 
-* Massive file support: Introduced chunked node scanning to prevent timeouts on large documents
-* Smoother processing: Yields between batches to keep Figma responsive during long scans
-* Concurrent loading: Optimized loadAsync() with capped concurrency to avoid memory spikes
-* Live progress feedback: UI now updates in real-time while scanning
+* More reliable apply verification: Variable application is now checked after every apply and retried once before being marked as failed
+* Visible failure reporting: Apply failures are surfaced directly in the UI instead of failing silently
+* Stronger selection-scope remapping: Single selected layers, instance children, and override nodes are now included more reliably during apply
+* Better mixed-text handling: Text segment variable application has improved verification and failure reporting
+* Unified apply result panel: The UI now shows one clear apply outcome instead of multiple overlapping success messages
 
-🔍 More Accurate Scanning
+Fixes
 
-* Hidden layers included: Variables are now detected even in hidden content
-* Instance-aware scanning: Correctly captures variables inside instances and nested structures
-* Segment-level text support: Detects variables applied to partial text ranges (e.g. links within text)
-* Improved variable resolution: Multi-step fallback ensures better matching across libraries
+* Fixed cases where applying a variable appeared to do nothing
+* Fixed selection-scope edge cases where a valid selected node could be skipped during apply
+* Fixed misleading success messaging when no bindings were actually applied
+* Improved resilience when remapping variables on instance-related nodes and overrides
 
-🧠 Smarter Variable Handling
+UX improvements
 
-* Broken variables surfaced: Missing or detached variables are now clearly identified
-* Deduplication improvements: Variables with identical name + collection are consolidated
-* Better mapping logic: More reliable remapping across collections and libraries
-* Bulk remap by collection: Quickly remap entire sets of variables at once
+* Apply results now use consistent “applied” terminology
+* Skipped bindings are included in the apply summary when relevant
+* Pre-apply summary chips stay visible but no longer compete with the main result state after apply
 
-🛠 Fixes
+Why this matters
 
-* Fixed issue where instance overrides were not fully applied (now includes the originating node)
-* Fixed cases where selection-based remapping would fail silently
-* Fixed inconsistencies with text variables not applying across mixed styles
-* Improved handling of edge cases in variable bindings
-
-🎛 UX Improvements
-
-* Clearer scan progress and stats (nodes scanned, variables found, etc.)
-* Better handling of large result sets in the UI
-* Persistent UI preferences (scope, theme, recent collections)
-
-⸻
-
-⚡ Summary
-
-This version makes the plugin significantly more robust for real-world design systems—especially large files, complex components, and mixed text styles—while giving much better visibility into what’s happening under the hood.
+This update makes Blueprint much easier to trust on complex design system cleanup work. When something applies, you can see it clearly. When something fails, you can see exactly where and why.

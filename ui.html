@@ -1231,6 +1231,10 @@
         gap: 6px;
         align-items: center;
         flex-wrap: wrap;
+        transition: opacity 160ms ease;
+      }
+      .summary-row.summary-row-secondary {
+        opacity: 0.62;
       }
 
       .stat-chip {
@@ -1481,6 +1485,9 @@
         margin-top: 10px;
         padding-top: 10px;
         border-top: 1px solid rgba(0, 0, 0, 0.08);
+      }
+      .result-panel-inline {
+        margin-bottom: 14px;
       }
       .result-errors .section-title {
         display: flex;
@@ -2614,6 +2621,7 @@
         mappingSummaryCache: null,
         banner: null,
         variableErrorsById: {},
+        lastRebindResult: null,
         recentlyUpdatedVariableIds: {},
         justMappedVariableIds: {},
         scanInProgress: false,
@@ -2945,7 +2953,8 @@
         }
 
         const missingIds = ids.filter(
-          (id) => !Object.prototype.hasOwnProperty.call(state.nodeDetailsById, id),
+          (id) =>
+            !Object.prototype.hasOwnProperty.call(state.nodeDetailsById, id),
         );
         if (missingIds.length === 0) {
           callback(ids.map((id) => state.nodeDetailsById[id]).filter(Boolean));
@@ -3282,6 +3291,7 @@
         state.banner = null;
         resetScanData();
         state.variableErrorsById = {};
+        state.lastRebindResult = null;
         state.recentlyUpdatedVariableIds = {};
         state.justMappedVariableIds = {};
         state.mappings = {};
@@ -3334,6 +3344,7 @@
         state.mappings = {};
         state.nodeMappings = {};
         state.variableErrorsById = {};
+        state.lastRebindResult = null;
         state.recentlyUpdatedVariableIds = {};
         state.justMappedVariableIds = {};
         bumpMappingVersion();
@@ -3389,8 +3400,9 @@
 
         state.applyInProgress = true;
         state.banner = null;
+        state.lastRebindResult = null;
         setLoading(true, "Applying…");
-        showProgress("Starting remapping…", 0);
+        showProgress("Starting apply…", 0);
         rebindBtn.disabled = true;
         parent.postMessage(
           {
@@ -3495,7 +3507,11 @@
           state.scanInProgress = false;
           state.scanStatus = null;
           state.emptyMessage = msg.message || "";
-          mergeScannedVariables(msg.variables, msg.nodeSummaryEntries, msg.stats);
+          mergeScannedVariables(
+            msg.variables,
+            msg.nodeSummaryEntries,
+            msg.stats,
+          );
           state.libraryCollections =
             msg.libraryCollections || state.libraryCollections;
           state.boundIdToKey = decodeLookupEntries(msg.boundIdToKeyEntries);
@@ -3666,6 +3682,20 @@
             return;
           }
           state.variableErrorsById = msg.variableErrorsById || {};
+          state.lastRebindResult = {
+            appliedVariableCount: Number(msg.updatedVariableCount) || 0,
+            reboundCount: msg.reboundCount || 0,
+            nodeCount: msg.nodeCount || 0,
+            skippedCount: msg.skippedCount || 0,
+            errors: Array.isArray(msg.errors) ? msg.errors : [],
+            warningSummary: Array.isArray(msg.warningSummary)
+              ? msg.warningSummary
+              : [],
+            applyFailures: Array.isArray(msg.applyFailures)
+              ? msg.applyFailures
+              : [],
+            applyFailureCount: Number(msg.applyFailureCount) || 0,
+          };
           const updatedVariableIds = Array.isArray(msg.updatedVariableIds)
             ? msg.updatedVariableIds
             : [];
@@ -3675,16 +3705,8 @@
               highlight: true,
             });
           }
-          if ((msg.updatedVariableCount || 0) > 0) {
-            showBanner(
-              `${msg.updatedVariableCount} variable${msg.updatedVariableCount !== 1 ? "s" : ""} updated`,
-              "success",
-            );
-          } else if (msg.errors && msg.errors.length > 0) {
-            showBanner("Some variables could not be updated", "warn");
-          } else {
-            showBanner("No variables updated", "warn");
-          }
+          state.banner = null;
+          renderMain();
           updateRebindBtn();
         }
       };
@@ -3846,13 +3868,14 @@
         const hiddenLayerTotal = state.stats ? state.stats.hiddenLayerCount : 0;
 
         const summaryDiv = document.createElement("div");
-        summaryDiv.className = "summary-row";
+        summaryDiv.className =
+          "summary-row" + (state.lastRebindResult ? " summary-row-secondary" : "");
         summaryDiv.innerHTML = `
     <span class="stat-chip chip-total">${LINK_ICON} ${totalCount} variable${totalCount !== 1 ? "s" : ""} found</span>
     ${state.scanInProgress ? `<span class="stat-chip chip-live"><span class="spinner spinner-compact"></span> Scanning…</span>` : ""}
     ${mappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${mappedCount} variable${mappedCount !== 1 ? "s" : ""} ready</span>` : ""}
     ${nodeMappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${nodeMappedCount} layer override${nodeMappedCount !== 1 ? "s" : ""}</span>` : ""}
-    ${hiddenLayerTotal > 0 ? `<span class="stat-chip chip-hidden" title="Hidden layers are included in scan and remapping">${EYE_OFF_ICON} ${hiddenLayerTotal} hidden layer${hiddenLayerTotal !== 1 ? "s" : ""}</span>` : ""}
+    ${hiddenLayerTotal > 0 ? `<span class="stat-chip chip-hidden" title="Hidden layers are included in scan and apply">${EYE_OFF_ICON} ${hiddenLayerTotal} hidden layer${hiddenLayerTotal !== 1 ? "s" : ""}</span>` : ""}
     ${brokenCount > 0 ? `<span class="stat-chip chip-broken" title="Variables that could not be resolved — source library may be missing">${brokenCount} broken</span>` : ""}
   `;
         fragment.appendChild(summaryDiv);
@@ -3866,6 +3889,11 @@
           liveNote.className = "scan-live-note";
           liveNote.innerHTML = `<span class="spinner spinner-compact"></span><span><strong>Scanning…</strong> ${totalCount} variable${totalCount !== 1 ? "s are" : " is"} ready so far${liveTotalNodes > 0 ? ` across ${liveTotalNodes} node${liveTotalNodes !== 1 ? "s" : ""}` : ""}. ${liveResolved > 0 ? `${liveResolved} of ${liveDiscovered} variable reference${liveDiscovered !== 1 ? "s" : ""} resolved.` : "Results will appear here as they are discovered."} You can start mapping now; apply unlocks when the scan finishes.</span>`;
           fragment.appendChild(liveNote);
+        }
+
+        if (state.lastRebindResult) {
+          const resultPanel = renderApplyResult(state.lastRebindResult);
+          if (resultPanel) fragment.appendChild(resultPanel);
         }
 
         // Filter bar
@@ -5498,6 +5526,9 @@
         const hiddenLayerTotal = state.stats ? state.stats.hiddenLayerCount : 0;
         const summaryEl = mainEl.querySelector(".summary-row");
         if (summaryEl) {
+          summaryEl.className =
+            "summary-row" +
+            (state.lastRebindResult ? " summary-row-secondary" : "");
           summaryEl.innerHTML = `
       <span class="stat-chip chip-total">${LINK_ICON} ${totalCount} variable${totalCount !== 1 ? "s" : ""} found</span>
       ${state.scanInProgress ? `<span class="stat-chip chip-live"><span class="spinner spinner-compact"></span> Scanning…</span>` : ""}
@@ -5540,69 +5571,77 @@
           );
       }
 
-      function renderResult(msg) {
-        mainEl.innerHTML = "";
-        scanBtn.disabled = false;
-        scanBtn.textContent = "Scan Again";
-        rebindBtn.style.display = "none";
-        rebindBtn.disabled = true;
-
-        const hasResults = msg.reboundCount > 0;
+      function renderApplyResult(msg) {
+        if (!msg) return null;
+        const hasFailures = (msg.applyFailureCount || 0) > 0;
+        const hasAppliedVariables = (msg.appliedVariableCount || 0) > 0;
+        const panelVariant = hasFailures
+          ? "result-warn"
+          : hasAppliedVariables
+            ? "result-success"
+            : "result-info";
+        const panelIcon = hasFailures
+          ? STATUS_ICONS.warn
+          : hasAppliedVariables
+            ? STATUS_ICONS.success
+            : STATUS_ICONS.info;
         const panel = document.createElement("div");
-        panel.className =
-          "result-panel " + (hasResults ? "result-success" : "result-warn");
-
-        const iconSvg = hasResults ? STATUS_ICONS.success : STATUS_ICONS.warn;
-        const titleText = `${hasResults ? "Done! " : "Nothing remapped. "}${msg.reboundCount} binding${msg.reboundCount !== 1 ? "s" : ""} remapped`;
+        panel.className = `result-panel result-panel-inline ${panelVariant}`;
 
         const titleDiv = document.createElement("div");
         titleDiv.className = "result-title";
-        titleDiv.innerHTML = iconSvg + " " + escHtml(titleText);
+        titleDiv.innerHTML =
+          panelIcon +
+          " " +
+          escHtml(
+            hasFailures
+              ? `${msg.applyFailureCount} variable application failure${msg.applyFailureCount !== 1 ? "s" : ""} detected`
+              : `${msg.appliedVariableCount || 0} variable${msg.appliedVariableCount === 1 ? "" : "s"} applied`,
+          );
 
         const subDiv = document.createElement("div");
         subDiv.className = "result-subtext";
-        const skippedNote =
-          msg.skippedCount > 0
-            ? ` — ${msg.skippedCount} binding${msg.skippedCount !== 1 ? "s" : ""} had no mapping configured`
-            : "";
-        subDiv.textContent = `Across ${msg.nodeCount} node${msg.nodeCount !== 1 ? "s" : ""}${skippedNote}.`;
+        const detailParts = [
+          `Across ${msg.nodeCount} node${msg.nodeCount === 1 ? "" : "s"}`,
+          `${msg.reboundCount || 0} binding${msg.reboundCount === 1 ? "" : "s"} applied`,
+        ];
+        if ((msg.skippedCount || 0) > 0) {
+          detailParts.push(`${msg.skippedCount} skipped (no mapping)`);
+        }
+        subDiv.textContent = detailParts.join(" · ");
 
         panel.appendChild(titleDiv);
         panel.appendChild(subDiv);
 
-        if (msg.errors && msg.errors.length > 0) {
-          const warningSummary =
-            Array.isArray(msg.warningSummary) && msg.warningSummary.length > 0
-              ? msg.warningSummary
-              : summarizeWarnings(msg.errors);
-          const errSection = document.createElement("div");
-          errSection.className = "result-errors";
+        if (hasFailures) {
+          const failureSection = document.createElement("div");
+          failureSection.className = "result-errors";
 
-          const errHeader = document.createElement("div");
-          errHeader.className = "section-title result-warning-title";
-          errHeader.innerHTML =
-            STATUS_ICONS.warn + " Warnings (" + msg.errors.length + ")";
-          errSection.appendChild(errHeader);
+          const failureHeader = document.createElement("div");
+          failureHeader.className = "section-title result-warning-title";
+          failureHeader.innerHTML =
+            STATUS_ICONS.error +
+            ` Verification failures (${msg.applyFailureCount})`;
+          failureSection.appendChild(failureHeader);
 
-          warningSummary.slice(0, 10).forEach((warning) => {
+          (msg.applyFailures || []).slice(0, 8).forEach((failure) => {
             const item = document.createElement("div");
             item.className = "error-item";
-            item.textContent =
-              warning.count > 1
-                ? warning.message + " (" + warning.count + "x)"
-                : warning.message;
-            errSection.appendChild(item);
+            item.textContent = `${failure.nodeName} [${failure.nodeId}] ${failure.field} -> ${failure.variableId}`;
+            failureSection.appendChild(item);
           });
-          if (warningSummary.length > 10) {
+
+          if ((msg.applyFailures || []).length > 8) {
             const more = document.createElement("div");
             more.className = "error-item";
-            more.textContent = `…and ${warningSummary.length - 10} more warning type${warningSummary.length - 10 !== 1 ? "s" : ""}`;
-            errSection.appendChild(more);
+            more.textContent = `…and ${(msg.applyFailures || []).length - 8} more failed application${(msg.applyFailures || []).length - 8 !== 1 ? "s" : ""}`;
+            failureSection.appendChild(more);
           }
-          panel.appendChild(errSection);
+
+          panel.appendChild(failureSection);
         }
 
-        mainEl.appendChild(panel);
+        return panel;
       }
 
       // ── Utilities ─────────────────────────────────────────────────────────────────
