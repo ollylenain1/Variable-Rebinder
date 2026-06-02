@@ -905,6 +905,26 @@
         text-overflow: ellipsis;
       }
 
+      .var-name-number,
+      .var-picker-number {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 2.1em;
+        margin: 0 1px;
+        padding: 1px 5px 2px;
+        border-radius: 6px;
+        background: var(--accent-dim);
+        color: var(--accent);
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0;
+        line-height: 1.2;
+        vertical-align: baseline;
+      }
+
       .var-from {
         font-size: 10px;
         color: var(--text-muted);
@@ -2090,7 +2110,7 @@
 
       .var-picker-list {
         overflow-y: auto;
-        max-height: 260px;
+        max-height: 300px;
         padding: 4px 5px;
       }
 
@@ -2182,16 +2202,16 @@
       /* Item row */
       .var-picker-item {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 7px;
-        padding: 5px 8px 5px 12px;
+        padding: 7px 8px 7px 12px;
         font-size: 12px;
         color: var(--text);
         cursor: pointer;
         border-radius: var(--radius-sm);
         transition: background 0.1s;
-        white-space: nowrap;
         margin: 1px 0;
+        min-height: 34px;
       }
 
       .var-picker-item[data-depth="1"] {
@@ -2216,6 +2236,7 @@
         font-size: 10px;
         color: var(--accent);
         opacity: 0;
+        margin-top: 1px;
       }
 
       .var-picker-item.selected .var-picker-item-check {
@@ -2223,9 +2244,36 @@
       }
 
       .var-picker-item-name {
-        flex: 1;
+        display: block;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+
+      .var-picker-item-content {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+
+      .var-picker-item-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-dim);
+        font-size: 10px;
+        line-height: 1.25;
+        letter-spacing: 0;
+      }
+
+      .var-picker-item-name .var-picker-number {
+        font-size: 10px;
+        transform: translateY(-1px);
       }
 
       .var-picker-empty {
@@ -2834,6 +2882,52 @@
         return Array.isArray(variables)
           ? variables.map(normalizeVariableRecord)
           : [];
+      }
+
+      const variableNameCollator = new Intl.Collator(undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+
+      function compareVariableNames(a, b, nameGetter) {
+        const getName =
+          typeof nameGetter === "function"
+            ? nameGetter
+            : (value) => value && (value._leafName || value.name);
+        const aName = String(getName(a) || "");
+        const bName = String(getName(b) || "");
+        const byName = variableNameCollator.compare(aName, bName);
+        if (byName !== 0) return byName;
+        return variableNameCollator.compare(
+          String((a && a.name) || ""),
+          String((b && b.name) || ""),
+        );
+      }
+
+      function appendNameWithNumericTokens(container, name, numberClass) {
+        const text = String(name || "");
+        if (!text) return;
+        const tokenPattern = /(\d+(?:\.\d+)?%?)/g;
+        let lastIndex = 0;
+        let match;
+
+        while ((match = tokenPattern.exec(text)) !== null) {
+          if (match.index > lastIndex) {
+            container.appendChild(
+              document.createTextNode(text.slice(lastIndex, match.index)),
+            );
+          }
+
+          const numberToken = document.createElement("span");
+          numberToken.className = numberClass;
+          numberToken.textContent = match[0];
+          container.appendChild(numberToken);
+          lastIndex = match.index + match[0].length;
+        }
+
+        if (lastIndex < text.length) {
+          container.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
       }
 
       function decodeNodeSummaryEntries(entries) {
@@ -5293,6 +5387,17 @@
     <div class="var-card-body"></div>
   `;
 
+        const variableNameEl = card.querySelector(".var-name");
+        if (variableNameEl) {
+          variableNameEl.title = variable.name;
+          variableNameEl.replaceChildren();
+          appendNameWithNumericTokens(
+            variableNameEl,
+            variable.name,
+            "var-name-number",
+          );
+        }
+
         const laDiv = card.querySelector("#la-" + sid);
         const cardBody = card.querySelector(".var-card-body");
         const mappedDot = document.createElement("span");
@@ -5702,14 +5807,23 @@
           if (cached) return cached;
 
           const root = { children: {}, items: [], count: 0 };
-          const searchIndex = vars.map((v) => ({
-            variable: v,
-            leafName: v._leafName,
-            lowerName: v._lowerName,
-          }));
+          const searchIndex = vars
+            .map((v) => ({
+              variable: v,
+              leafName: v._leafName,
+              lowerName: v._lowerName,
+            }))
+            .sort((a, b) =>
+              compareVariableNames(a.variable, b.variable, (value) =>
+                value ? value._leafName : "",
+              ),
+            );
 
           for (const v of vars) {
-            const parts = v._pathSegments || [v._leafName];
+            const parts =
+              Array.isArray(v._pathSegments) && v._pathSegments.length > 0
+                ? v._pathSegments.filter(Boolean)
+                : [v._leafName || v.name || ""];
             root.count += 1;
             if (parts.length === 1) {
               root.items.push({ variable: v, leafName: v._leafName });
@@ -5732,9 +5846,42 @@
             });
           }
 
+          root.items.sort((a, b) =>
+            compareVariableNames(a.variable, b.variable, (value) =>
+              value ? value._leafName : "",
+            ),
+          );
+          sortPickerTree(root);
+
           cached = { tree: root, searchIndex };
           state.pickerDataCache.set(vars, cached);
           return cached;
+        }
+
+        function sortPickerTree(node) {
+          Object.values(node.children || {}).forEach((child) => {
+            child.items.sort((a, b) =>
+              compareVariableNames(a.variable, b.variable, (value) =>
+                value ? value._leafName : "",
+              ),
+            );
+            sortPickerTree(child);
+          });
+        }
+
+        function getPickerItemMeta(variable, displayName, forceContext) {
+          const parts =
+            Array.isArray(variable && variable._pathSegments) &&
+            variable._pathSegments.length > 0
+              ? variable._pathSegments.filter(Boolean)
+              : [];
+          const parentPath =
+            parts.length > 1 ? parts.slice(0, -1).join(" / ") : "";
+          if (forceContext && parentPath) return parentPath;
+          if (forceContext && variable && variable.name !== displayName) {
+            return variable.name;
+          }
+          return "";
         }
 
         // ── State ────────────────────────────────────────────────────────────────
@@ -5812,7 +5959,9 @@
             } else {
               for (const entry of results) {
                 fragment.appendChild(
-                  makeItemRow(entry.variable, 0, entry.leafName),
+                  makeItemRow(entry.variable, 0, entry.leafName, {
+                    showContext: true,
+                  }),
                 );
               }
             }
@@ -5828,11 +5977,15 @@
           // Ungrouped items first (root level only at top)
           for (const entry of node.items) {
             container.appendChild(
-              makeItemRow(entry.variable, depth, entry.leafName),
+              makeItemRow(entry.variable, depth, entry.leafName, {
+                showContext: depth === 0,
+              }),
             );
           }
           // Groups (sorted)
-          for (const groupName of Object.keys(node.children).sort()) {
+          for (const groupName of Object.keys(node.children).sort((a, b) =>
+            variableNameCollator.compare(a, b),
+          )) {
             const child = node.children[groupName];
 
             const groupHeader = document.createElement("div");
@@ -5871,7 +6024,13 @@
           }
         }
 
-        function makeItemRow(v, depth, leafName) {
+        function makeItemRow(v, depth, leafName, options) {
+          const displayName = leafName || v._leafName || v.name || "";
+          const meta = getPickerItemMeta(
+            v,
+            displayName,
+            !!(options && options.showContext),
+          );
           const row = document.createElement("div");
           row.className =
             "var-picker-item" +
@@ -5882,13 +6041,29 @@
           check.className = "var-picker-item-check";
           check.textContent = "✓";
 
+          const content = document.createElement("span");
+          content.className = "var-picker-item-content";
+
           const name = document.createElement("span");
           name.className = "var-picker-item-name";
-          name.textContent = leafName || v._leafName;
           name.title = v.name;
+          appendNameWithNumericTokens(
+            name,
+            displayName,
+            "var-picker-number",
+          );
+
+          content.appendChild(name);
+          if (meta) {
+            const metaEl = document.createElement("span");
+            metaEl.className = "var-picker-item-meta";
+            metaEl.textContent = meta;
+            metaEl.title = meta;
+            content.appendChild(metaEl);
+          }
 
           row.appendChild(check);
-          row.appendChild(name);
+          row.appendChild(content);
 
           row.addEventListener("mousedown", (e) => {
             e.preventDefault();

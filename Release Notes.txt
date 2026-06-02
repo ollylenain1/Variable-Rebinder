@@ -9,6 +9,8 @@ What’s new
 * Stronger selection-scope remapping: Single selected layers, instance children, and override nodes are now included more reliably during apply
 * Better mixed-text handling: Text segment variable application has improved verification and failure reporting
 * Smarter target variable lists: Variable pickers now show unscoped variables plus variables scoped to the selected surface, while hiding incompatible scoped variables
+* Clearer numbered variable names: Numeric parts of variable names are now visually highlighted, making names like Neutral 000, Neutral 100, and Neutral 900 easier to compare
+* Natural numeric sorting: Target variable lists now sort numbered names in a more human-friendly order
 * Unified apply result panel: The UI now shows one clear apply outcome instead of multiple overlapping success messages
 
 Fixes
@@ -24,6 +26,7 @@ UX improvements
 * Apply results now use consistent “applied” terminology
 * Skipped bindings are included in the apply summary when relevant
 * Pre-apply summary chips stay visible but no longer compete with the main result state after apply
+* Variable picker rows now include clearer spacing and path context when searching, so similar variable names are easier to distinguish
 
 Why this matters
 
