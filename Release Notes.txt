@@ -31,3 +31,10 @@ UX improvements
 Why this matters
 
 This update makes Blueprint much easier to trust on complex design system cleanup work. When something applies, you can see it clearly. When something fails, you can see exactly where and why.
+
+What changed:
+
+Numeric parts of variable names now render as tabular accent chips, so Neutral 000, Neutral 100, 95%, etc. are much easier to scan.
+Variable picker rows now have a cleaner two-line layout when context is useful.
+Picker sorting is now numeric-aware, so numbered variables order more naturally.
+Scanned variable cards also highlight numeric tokens for consistency.
