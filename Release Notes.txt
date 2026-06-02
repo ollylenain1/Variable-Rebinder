@@ -8,11 +8,13 @@ What’s new
 * Visible failure reporting: Apply failures are surfaced directly in the UI instead of failing silently
 * Stronger selection-scope remapping: Single selected layers, instance children, and override nodes are now included more reliably during apply
 * Better mixed-text handling: Text segment variable application has improved verification and failure reporting
+* Smarter target variable lists: Variable pickers now show unscoped variables plus variables scoped to the selected surface, while hiding incompatible scoped variables
 * Unified apply result panel: The UI now shows one clear apply outcome instead of multiple overlapping success messages
 
 Fixes
 
 * Fixed cases where applying a variable appeared to do nothing
+* Fixed text-fill target variables with TEXT_FILL scope not appearing when scope metadata had to be resolved from a remote library
 * Fixed selection-scope edge cases where a valid selected node could be skipped during apply
 * Fixed misleading success messaging when no bindings were actually applied
 * Improved resilience when remapping variables on instance-related nodes and overrides

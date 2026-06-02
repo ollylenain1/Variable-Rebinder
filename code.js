@@ -2,7 +2,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Key improvements over v2.x:
 //   • Chunked node walking with inter-chunk yields — no timeouts on huge files
-//   • All nodes walked regardless of visibility (hidden layers are always included)
+//   • Visibility-aware traversal pruning for hidden/no-variable branches
 //   • Concurrent loadAsync() with capped concurrency (avoids memory spikes)
 //   • Progress messages sent to UI during long scans
 //   • Broken/unresolved variables surfaced as a dedicated category
@@ -21,6 +21,7 @@ figma.showUI(__html__, {
 const CHUNK_SIZE = 400; // nodes processed per tick before yielding
 const LOAD_CONCURRENCY = 20; // max parallel loadAsync() calls
 const PROGRESS_INTERVAL = 900; // ms between UI update messages
+const LIGHT_SCAN_NODE_THRESHOLD = 50000;
 const UI_PREFERENCES_KEY = "uiPreferences.v1";
 
 // Fields exposed in boundVariables that setBoundVariable cannot set
@@ -29,6 +30,52 @@ const UNSETTABLE_FIELDS = new Set(["textRangeFills", "textRangeStrokes"]);
 // Paint array fields — must use setBoundVariableForPaint + node[field] assignment
 const PAINT_FIELDS = new Set(["fills", "strokes"]);
 const variableCache = new Map(); // key: variableId -> value: variable
+const FRAME_FILL_NODE_TYPES = new Set([
+  "FRAME",
+  "COMPONENT",
+  "COMPONENT_SET",
+  "INSTANCE",
+  "SECTION",
+  "PAGE",
+  "SLIDE",
+  "SLIDE_ROW",
+  "TABLE",
+]);
+const FIELD_SCOPE_MAP = {
+  characters: ["TEXT_CONTENT"],
+  width: ["WIDTH_HEIGHT"],
+  height: ["WIDTH_HEIGHT"],
+  minWidth: ["WIDTH_HEIGHT"],
+  maxWidth: ["WIDTH_HEIGHT"],
+  minHeight: ["WIDTH_HEIGHT"],
+  maxHeight: ["WIDTH_HEIGHT"],
+  itemSpacing: ["GAP"],
+  counterAxisSpacing: ["GAP"],
+  paddingLeft: ["GAP"],
+  paddingRight: ["GAP"],
+  paddingTop: ["GAP"],
+  paddingBottom: ["GAP"],
+  gridRowGap: ["GAP"],
+  gridColumnGap: ["GAP"],
+  topLeftRadius: ["CORNER_RADIUS"],
+  topRightRadius: ["CORNER_RADIUS"],
+  bottomLeftRadius: ["CORNER_RADIUS"],
+  bottomRightRadius: ["CORNER_RADIUS"],
+  strokeWeight: ["STROKE_FLOAT"],
+  strokeTopWeight: ["STROKE_FLOAT"],
+  strokeRightWeight: ["STROKE_FLOAT"],
+  strokeBottomWeight: ["STROKE_FLOAT"],
+  strokeLeftWeight: ["STROKE_FLOAT"],
+  opacity: ["OPACITY"],
+  fontFamily: ["FONT_FAMILY"],
+  fontStyle: ["FONT_STYLE"],
+  fontWeight: ["FONT_WEIGHT"],
+  fontSize: ["FONT_SIZE"],
+  lineHeight: ["LINE_HEIGHT"],
+  letterSpacing: ["LETTER_SPACING"],
+  paragraphSpacing: ["PARAGRAPH_SPACING"],
+  paragraphIndent: ["PARAGRAPH_INDENT"],
+};
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -49,7 +96,9 @@ function sanitizeUIPreferences(raw) {
   const recentCollectionKeys = Array.isArray(prefs.recentCollectionKeys)
     ? prefs.recentCollectionKeys.length > 8
       ? prefs.recentCollectionKeys
-          .filter((value) => typeof value === "string" && value.trim().length > 0)
+          .filter(
+            (value) => typeof value === "string" && value.trim().length > 0,
+          )
           .slice(0, 8)
       : prefs.recentCollectionKeys.filter(
           (value) => typeof value === "string" && value.trim().length > 0,
@@ -127,46 +176,91 @@ async function getCachedVariable(id) {
   }
 }
 
-function shouldScanNodeForVariables(node) {
-  return !!node.boundVariables || node.type === "TEXT";
+function nodeHasBoundVariables(node) {
+  return !!(node && node.boundVariables != null);
 }
 
+function isNodeSelfHiddenForTraversal(node) {
+  if (!node) return false;
+  if ("visible" in node && node.visible === false) return true;
+  if ("opacity" in node && node.opacity === 0) return true;
+  return false;
+}
+
+/**
+ * Walk the full node tree but only collect nodes that can carry variable
+ * bindings (boundVariables present OR TEXT node). This avoids allocating a
+ * giant allNodes array of every frame, group, page, etc. and then filtering
+ * it down — we filter during traversal instead.
+ *
+ * Returns:
+ *   scanNodes   – nodes to process (has boundVariables OR is TEXT)
+ *   needLoad    – subset that also need loadAsync() before reading properties
+ *   totalTraversed – total nodes visited (for reduction reporting)
+ *   lightScanMode – true when traversal exceeded the safeguard threshold
+ */
 function collectNodesForScan(roots) {
-  const allNodes = [];
+  const scanNodes = [];
   const needLoad = [];
+  let totalTraversed = 0;
+  let lightScanMode = false;
 
   for (const root of roots) {
-    if (scanCancelled) return { allNodes, needLoad };
-    const stack = [{ node: root, hasInstanceAncestor: false }];
+    if (scanCancelled) {
+      return { scanNodes, needLoad, totalTraversed, lightScanMode };
+    }
+    const stack = [
+      { node: root, hasInstanceAncestor: false, hasHiddenAncestor: false },
+    ];
     while (stack.length > 0) {
-      if (scanCancelled) return { allNodes, needLoad };
+      if (scanCancelled) {
+        return { scanNodes, needLoad, totalTraversed, lightScanMode };
+      }
       const current = stack.pop();
       const node = current.node;
-      allNodes.push(node);
+      totalTraversed += 1;
+      if (!lightScanMode && totalTraversed > LIGHT_SCAN_NODE_THRESHOLD) {
+        lightScanMode = true;
+      }
 
-      const hasVars = node.boundVariables != null;
-      if (
-        (node.type === "TEXT" && hasVars) ||
-        (hasVars && current.hasInstanceAncestor)
-      ) {
-        needLoad.push(node);
+      const hasVars = nodeHasBoundVariables(node);
+      const isText = node.type === "TEXT";
+      const isSelfHidden = isNodeSelfHiddenForTraversal(node);
+      const isEffectivelyHiddenForTraversal =
+        current.hasHiddenAncestor || isSelfHidden;
+
+      if (!hasVars && isEffectivelyHiddenForTraversal) {
+        continue;
+      }
+
+      // Only collect nodes that can carry variable bindings.
+      if (hasVars || isText) {
+        scanNodes.push(node);
+        // loadAsync() is needed for TEXT nodes with variables, and for any
+        // node with variables that lives inside an INSTANCE ancestor (overrides).
+        if ((isText && hasVars) || (hasVars && current.hasInstanceAncestor)) {
+          needLoad.push(node);
+        }
       }
 
       if ("children" in node) {
         const childHasInstanceAncestor =
           current.hasInstanceAncestor || node.type === "INSTANCE";
         for (let i = node.children.length - 1; i >= 0; i--) {
-          if (scanCancelled) return { allNodes, needLoad };
+          if (scanCancelled) {
+            return { scanNodes, needLoad, totalTraversed, lightScanMode };
+          }
           stack.push({
             node: node.children[i],
             hasInstanceAncestor: childHasInstanceAncestor,
+            hasHiddenAncestor: isEffectivelyHiddenForTraversal,
           });
         }
       }
     }
   }
 
-  return { allNodes, needLoad };
+  return { scanNodes, needLoad, totalTraversed, lightScanMode };
 }
 
 function collectNodesForRebind(roots, includeHidden) {
@@ -517,17 +611,11 @@ function didVariableApply(node, field, expectedId) {
   if (Array.isArray(val)) {
     return val.some(
       (item) =>
-        item &&
-        item.type === "VARIABLE_ALIAS" &&
-        item.id === expectedId,
+        item && item.type === "VARIABLE_ALIAS" && item.id === expectedId,
     );
   }
 
-  return !!(
-    val &&
-    val.type === "VARIABLE_ALIAS" &&
-    val.id === expectedId
-  );
+  return !!(val && val.type === "VARIABLE_ALIAS" && val.id === expectedId);
 }
 
 function didTextSegmentVariableApply(node, start, end, index, expectedId) {
@@ -545,15 +633,8 @@ function didTextSegmentVariableApply(node, start, end, index, expectedId) {
       if (seg.start !== start || seg.end !== end) continue;
       const paints = Array.isArray(seg.fills) ? seg.fills : [];
       const paint = paints[index];
-      const alias =
-        paint &&
-        paint.boundVariables &&
-        paint.boundVariables.color;
-      if (
-        alias &&
-        alias.type === "VARIABLE_ALIAS" &&
-        alias.id === expectedId
-      ) {
+      const alias = paint && paint.boundVariables && paint.boundVariables.color;
+      if (alias && alias.type === "VARIABLE_ALIAS" && alias.id === expectedId) {
         return true;
       }
     }
@@ -575,14 +656,59 @@ function getApplyFailureField(field, segmentRange) {
   return field;
 }
 
+function getFillVariableScope(node) {
+  if (!node) return null;
+  if (node.type === "TEXT" || node.type === "TEXT_PATH") {
+    return "TEXT_FILL";
+  }
+  return FRAME_FILL_NODE_TYPES.has(node.type) ? "FRAME_FILL" : "SHAPE_FILL";
+}
+
+function getEffectVariableScopes(node, entry) {
+  const index = entry && typeof entry.index === "number" ? entry.index : null;
+  if (!node || !Array.isArray(node.effects) || index === null) return [];
+  const effect = node.effects[index];
+  if (!effect || !effect.boundVariables) return [];
+
+  const scopes = [];
+  for (const [field, alias] of Object.entries(effect.boundVariables)) {
+    if (!alias || alias.type !== "VARIABLE_ALIAS" || alias.id !== entry.id) {
+      continue;
+    }
+    scopes.push(field === "color" ? "EFFECT_COLOR" : "EFFECT_FLOAT");
+  }
+  return scopes;
+}
+
+function getRequiredScopesForEntry(node, entry) {
+  if (!node || !entry || !entry.field) return [];
+
+  if (entry.field === "fills") {
+    const fillScope = getFillVariableScope(node);
+    return fillScope ? [fillScope] : [];
+  }
+
+  if (entry.field === "strokes") {
+    return ["STROKE_COLOR"];
+  }
+
+  if (entry.field === "effects") {
+    return getEffectVariableScopes(node, entry);
+  }
+
+  return FIELD_SCOPE_MAP[entry.field] || [];
+}
+
 /**
- * Return true if `node` or any ancestor (up to PAGE) has visible===false.
- * Hidden nodes are still scanned and remapped — this is purely for display.
+ * Return true if `node` or any ancestor (up to PAGE) is visually hidden.
+ * Hidden nodes are still scanned and remapped when they carry bindings — this
+ * is used for display and traversal heuristics only.
  */
 function isEffectivelyHidden(node) {
   let cur = node;
   while (cur && cur.type !== "PAGE" && cur.type !== "DOCUMENT") {
     if ("visible" in cur && cur.visible === false) return true;
+    if ("opacity" in cur && cur.opacity === 0) return true;
     cur = cur.parent;
   }
   return false;
@@ -619,20 +745,161 @@ function encodeVariableRecords(variables) {
     variable.collectionName,
     variable.libraryName,
     variable.broken ? 1 : 0,
+    variable.isCrossCollectionDuplicate ? 1 : 0,
+    variable.isCrossLibraryDuplicate ? 1 : 0,
+    variable.isTypeConflict ? 1 : 0,
+    Array.isArray(variable.requiredScopes) ? variable.requiredScopes : [],
   ]);
 }
 
+function normalizeDuplicateName(name) {
+  return String(name || "")
+    .split("/")
+    .map((segment) => segment.trim().replace(/\s+/g, " "))
+    .join("/")
+    .toLowerCase();
+}
+
+function getVariableCollectionIdentity(variable) {
+  if (!variable) return "";
+  if (variable.collectionId) return "id:" + variable.collectionId;
+  return (
+    "name:" +
+    String(variable.libraryName || "")
+      .trim()
+      .toLowerCase() +
+    "\x00" +
+    String(variable.collectionName || "")
+      .trim()
+      .toLowerCase()
+  );
+}
+
+function getVariableLibraryIdentity(variable) {
+  return String((variable && variable.libraryName) || "(unknown library)")
+    .trim()
+    .toLowerCase();
+}
+
+function annotateDuplicateFlags(variables) {
+  const byNormalizedName = new Map();
+  const byNormalizedNameAndType = new Map();
+
+  for (const variable of variables || []) {
+    if (!variable) continue;
+    variable.isCrossCollectionDuplicate = false;
+    variable.isCrossLibraryDuplicate = false;
+    variable.isTypeConflict = false;
+
+    if (variable.broken) continue;
+
+    const normalizedName = normalizeDuplicateName(variable.name);
+    const typeKey = String(variable.resolvedType || "UNKNOWN");
+    const byTypeKey = normalizedName + "\x00" + typeKey;
+
+    if (!byNormalizedName.has(normalizedName)) {
+      byNormalizedName.set(normalizedName, []);
+    }
+    byNormalizedName.get(normalizedName).push(variable);
+
+    if (!byNormalizedNameAndType.has(byTypeKey)) {
+      byNormalizedNameAndType.set(byTypeKey, []);
+    }
+    byNormalizedNameAndType.get(byTypeKey).push(variable);
+  }
+
+  for (const group of byNormalizedNameAndType.values()) {
+    if (!group || group.length < 2) continue;
+
+    const collectionKeys = new Set(
+      group.map((variable) => getVariableCollectionIdentity(variable)),
+    );
+    const libraryKeys = new Set(
+      group.map((variable) => getVariableLibraryIdentity(variable)),
+    );
+    const isCrossCollectionDuplicate = collectionKeys.size > 1;
+    const isCrossLibraryDuplicate = libraryKeys.size > 1;
+
+    if (!isCrossCollectionDuplicate && !isCrossLibraryDuplicate) continue;
+    for (const variable of group) {
+      variable.isCrossCollectionDuplicate = isCrossCollectionDuplicate;
+      variable.isCrossLibraryDuplicate = isCrossLibraryDuplicate;
+    }
+  }
+
+  for (const group of byNormalizedName.values()) {
+    if (!group || group.length < 2) continue;
+    const typeKeys = new Set(
+      group.map((variable) => String(variable.resolvedType || "UNKNOWN")),
+    );
+    if (typeKeys.size < 2) continue;
+    for (const variable of group) {
+      variable.isTypeConflict = true;
+    }
+  }
+
+  return variables;
+}
+
 function encodeSummaryEntries(summaryByVariable) {
-  return Object.entries(summaryByVariable || {}).map(([variableId, summary]) => [
-    variableId,
-    summary && typeof summary.c === "number" ? summary.c : 0,
-    summary && typeof summary.h === "number" ? summary.h : 0,
-    summary && summary.i ? 1 : 0,
-  ]);
+  return Object.entries(summaryByVariable || {}).map(
+    ([variableId, summary]) => [
+      variableId,
+      summary && typeof summary.c === "number" ? summary.c : 0,
+      summary && typeof summary.h === "number" ? summary.h : 0,
+      summary && summary.i ? 1 : 0,
+    ],
+  );
 }
 
 function encodeLookupEntries(lookup) {
   return Object.entries(lookup || {});
+}
+
+function encodeArrayLookupEntries(lookup) {
+  return Object.entries(lookup || {}).map(([key, value]) => [
+    key,
+    Array.isArray(value) ? value : [],
+  ]);
+}
+
+function mergeScopeRequirement(scopeLookup, key, scopes) {
+  if (!key || !Array.isArray(scopes) || scopes.length === 0) return;
+  if (!scopeLookup[key]) {
+    scopeLookup[key] = new Set();
+  }
+  for (const scope of scopes) {
+    if (scope) {
+      scopeLookup[key].add(scope);
+    }
+  }
+}
+
+function finalizeScopeRequirements(scopeLookup, idRemap, keyMapper) {
+  const finalized = {};
+  for (const [rawKey, scopeSet] of Object.entries(scopeLookup || {})) {
+    if (!scopeSet || scopeSet.size === 0) continue;
+    const normalizedKey =
+      typeof keyMapper === "function"
+        ? keyMapper(rawKey, idRemap)
+        : getCanonicalVariableId(rawKey, idRemap);
+    if (!normalizedKey) continue;
+    if (!finalized[normalizedKey]) {
+      finalized[normalizedKey] = new Set();
+    }
+    for (const scope of scopeSet) {
+      if (scope) {
+        finalized[normalizedKey].add(scope);
+      }
+    }
+  }
+
+  return Object.fromEntries(
+    Object.entries(finalized).map(([key, scopes]) => [
+      key,
+      Array.from(scopes).sort(),
+    ]),
+  );
 }
 
 async function resolveNodeDetails(nodeIds) {
@@ -787,7 +1054,7 @@ async function handleScan({ scope }) {
       return;
     }
 
-    const scanNodes = collectNodesForScan(roots);
+    const scanResult = collectNodesForScan(roots);
     if (scanCancelled) {
       figma.ui.postMessage({
         type: "scan-result",
@@ -795,21 +1062,48 @@ async function handleScan({ scope }) {
       });
       return;
     }
-    const allNodes = scanNodes.allNodes.filter(shouldScanNodeForVariables);
-    const needLoad = scanNodes.needLoad.filter(shouldScanNodeForVariables);
+    // scanNodes contains only nodes with boundVariables or TEXT — pre-filtered
+    // during traversal. totalTraversed is the full count for reduction reporting.
+    const lightScanMode = !!scanResult.lightScanMode;
+    const allNodes = lightScanMode
+      ? scanResult.scanNodes.filter((node) => nodeHasBoundVariables(node))
+      : scanResult.scanNodes;
+    const needLoad = lightScanMode
+      ? scanResult.needLoad.filter((node) => nodeHasBoundVariables(node))
+      : scanResult.needLoad;
+    const totalTraversed = scanResult.totalTraversed;
+    console.log(
+      "[Variable Mapper] Traversed " +
+        totalTraversed +
+        " nodes, " +
+        allNodes.length +
+        " qualify for scan (" +
+        (totalTraversed > 0
+          ? Math.round((1 - allNodes.length / totalTraversed) * 100)
+          : 0) +
+        "% reduction)." +
+        (lightScanMode ? " Light scan mode enabled." : ""),
+    );
 
     let nodesLoaded = false;
     let collectionsFetched = false;
 
     const postPreparationProgress = () => {
       let message = `Loading ${allNodes.length} nodes and library metadata…`;
+      if (lightScanMode) {
+        message += " Light scan mode enabled.";
+      }
       let pct = 10;
 
       if (nodesLoaded && !collectionsFetched) {
-        message = "Nodes loaded. Fetching library metadata…";
+        message = lightScanMode
+          ? "Nodes loaded. Fetching library metadata (light scan mode)…"
+          : "Nodes loaded. Fetching library metadata…";
         pct = 13;
       } else if (!nodesLoaded && collectionsFetched) {
-        message = `Library metadata loaded. Loading ${allNodes.length} nodes…`;
+        message = lightScanMode
+          ? `Library metadata loaded. Loading ${allNodes.length} nodes (light scan mode)…`
+          : `Library metadata loaded. Loading ${allNodes.length} nodes…`;
         pct = 16;
       }
 
@@ -830,7 +1124,8 @@ async function handleScan({ scope }) {
             async (node) => {
               if (scanCancelled) return;
               try {
-                if (typeof node.loadAsync === "function") await node.loadAsync();
+                if (typeof node.loadAsync === "function")
+                  await node.loadAsync();
               } catch (err) {
                 debugWarn("scan loadAsync failed:", err);
               }
@@ -914,15 +1209,13 @@ async function handleScan({ scope }) {
       return;
     }
 
-    const {
-      remoteCollections,
-      remoteCollectionById,
-      localCollections,
-    } = collectionData;
+    const { remoteCollections, remoteCollectionById, localCollections } =
+      collectionData;
 
     figma.ui.postMessage({
       type: "scan-start",
       libraryCollections: remoteCollections.concat(localCollections),
+      lightScanMode,
       stats: {
         totalNodes: allNodes.length,
         hiddenLayerCount: 0,
@@ -937,15 +1230,18 @@ async function handleScan({ scope }) {
     // ── Step 4: Stream resolved variables while scanning nodes ───────────────
     figma.ui.postMessage({
       type: "scan-progress",
-      message: "Scanning for bound variables…",
+      message: lightScanMode
+        ? "Scanning for bound variables (light scan mode)…"
+        : "Scanning for bound variables…",
       pct: 20,
       scannedNodes: 0,
       totalNodes: allNodes.length,
     });
 
     const variableIdSet = new Set();
-    const nodeLevelIdSet = new Set();
     const nodesByVariableMap = {};
+    const rawRequiredScopesByVariableId = {};
+    const rawRequiredScopesByNodeVariableKey = {};
     const instanceChildNodeIds = {}; // node.id → true, for all instance-child nodes with bound variables
     const segmentBoundIdsByNode = {};
     const textSegmentCache = new Map(); // node.id -> getStyledTextSegments(["fills"])
@@ -955,14 +1251,48 @@ async function handleScan({ scope }) {
     const canonicalByNameCollection = {};
     const resolvedVariableIds = new Set();
     const idRemap = {};
-    const STREAM_VARIABLE_BATCH_SIZE = 40;
+    const STREAM_VARIABLE_BATCH_SIZE = 120;
+    const STREAM_VARIABLE_POST_THRESHOLD = 180;
+    const STREAM_UI_FLUSH_INTERVAL = Math.max(PROGRESS_INTERVAL, 1200);
+    const STREAM_PROGRESS_INTERVAL = STREAM_UI_FLUSH_INTERVAL + 300;
     let streamedVariableCount = 0;
     let resolvedVariableCount = 0;
     let lastProgressAt = Date.now();
     let lastChunkPostAt = Date.now();
     let pendingStreamedVariables = [];
     let pendingStreamedSummary = {};
-    const nameCollectionKey = (v) => v.name + "\x00" + (v.collectionId || "");
+    const flushPendingScanChunk = (scannedNodes, force = false) => {
+      if (
+        pendingStreamedVariables.length === 0 ||
+        (!force &&
+          pendingStreamedVariables.length < STREAM_VARIABLE_POST_THRESHOLD &&
+          Date.now() - lastChunkPostAt < STREAM_UI_FLUSH_INTERVAL)
+      ) {
+        return false;
+      }
+
+      figma.ui.postMessage({
+        type: "scan-chunk",
+        variables: encodeVariableRecords(pendingStreamedVariables),
+        nodeSummaryEntries: encodeSummaryEntries(pendingStreamedSummary),
+        stats: {
+          scannedNodes,
+          variableCount: streamedVariableCount,
+          discoveredCount: variableIdSet.size,
+          resolvedVariableCount,
+        },
+      });
+      pendingStreamedVariables = [];
+      pendingStreamedSummary = {};
+      lastChunkPostAt = Date.now();
+      return true;
+    };
+    const canonicalVariableKey = (variableInfo) =>
+      [
+        normalizeDuplicateName(variableInfo.name),
+        String(variableInfo.resolvedType || "UNKNOWN"),
+        getVariableCollectionIdentity(variableInfo),
+      ].join("\x00");
 
     const buildVariableInfo = (variable) => {
       if (!variable) return null;
@@ -1052,10 +1382,12 @@ async function handleScan({ scope }) {
               !localCollectionCache[variable.variableCollectionId]
             ) {
               try {
-                const col = await figma.variables.getVariableCollectionByIdAsync(
-                  variable.variableCollectionId,
-                );
-                localCollectionCache[variable.variableCollectionId] = col || null;
+                const col =
+                  await figma.variables.getVariableCollectionByIdAsync(
+                    variable.variableCollectionId,
+                  );
+                localCollectionCache[variable.variableCollectionId] =
+                  col || null;
               } catch (err) {
                 debugWarn("collection resolution failed:", err);
                 localCollectionCache[variable.variableCollectionId] = null;
@@ -1074,6 +1406,16 @@ async function handleScan({ scope }) {
           const variableInfo = buildVariableInfo(rawVariable);
           if (!variableInfo) continue;
 
+          const rawRequiredScopes = new Set([
+            ...Array.from(rawRequiredScopesByVariableId[variableInfo.id] || []),
+            ...Array.from(
+              rawRequiredScopesByVariableId[rawVariable._queriedId] || [],
+            ),
+          ]);
+          if (rawRequiredScopes.size > 0) {
+            variableInfo.requiredScopes = Array.from(rawRequiredScopes).sort();
+          }
+
           resolvedVariableIds.add(rawVariable._queriedId || rawVariable.id);
 
           if (variableInfo.broken) {
@@ -1085,7 +1427,7 @@ async function handleScan({ scope }) {
             continue;
           }
 
-          const key = nameCollectionKey(variableInfo);
+          const key = canonicalVariableKey(variableInfo);
           const canonical = canonicalByNameCollection[key];
           if (canonical && canonical.id !== variableInfo.id) {
             idRemap[variableInfo.id] = canonical.id;
@@ -1134,26 +1476,7 @@ async function handleScan({ scope }) {
           Object.assign(pendingStreamedSummary, streamedSummary);
         }
 
-        if (
-          pendingStreamedVariables.length > 0 &&
-          Date.now() - lastChunkPostAt >= PROGRESS_INTERVAL
-        ) {
-          figma.ui.postMessage({
-            type: "scan-chunk",
-            variables: encodeVariableRecords(pendingStreamedVariables),
-            nodeSummaryEntries: encodeSummaryEntries(pendingStreamedSummary),
-            stats: {
-              totalNodes: allNodes.length,
-              variableCount: streamedVariableCount,
-              discoveredCount: variableIdSet.size,
-              resolvedVariableCount,
-              scannedNodes,
-            },
-          });
-          pendingStreamedVariables = [];
-          pendingStreamedSummary = {};
-          lastChunkPostAt = Date.now();
-        }
+        flushPendingScanChunk(scannedNodes);
       }
     };
 
@@ -1179,28 +1502,47 @@ async function handleScan({ scope }) {
           });
           return;
         }
-        if (!node.boundVariables && node.type !== "TEXT") {
-          continue;
-        }
+        // Note: all nodes in allNodes already have boundVariables or are TEXT —
+        // the guard that was here has been moved into collectNodesForScan.
 
-        const hasMixedFills = hasTextRangeFillBindings(node);
+        const hasMixedFills = !lightScanMode && hasTextRangeFillBindings(node);
         const textFillSegments =
           node.type === "TEXT" && hasMixedFills
             ? getCachedTextFillSegments(node, textSegmentCache)
             : null;
+        const boundEntries = getBoundVariableEntries(node, textFillSegments);
         const nodeLevelIds = getBoundVariableIds(node);
         for (const id of nodeLevelIds) {
-          nodeLevelIdSet.add(id);
           if (!variableIdSet.has(id)) pendingNodeLevelIds.add(id);
         }
         const ids = Object.create(null);
         for (const id of nodeLevelIds) ids[id] = true;
-        const segmentIds = getSegmentBoundVariableIds(node, textFillSegments);
+        const segmentIds = lightScanMode
+          ? []
+          : getSegmentBoundVariableIds(node, textFillSegments);
         if (segmentIds.length > 0) segmentBoundIdsByNode[node.id] = segmentIds;
         for (const id of segmentIds) ids[id] = true;
         const inst = getNearestInstance(node);
         const hidden = isEffectivelyHidden(node);
         const pageName = getPageName(inst || node);
+        const representativeNodeId = inst ? inst.id : node.id;
+
+        for (const entry of boundEntries) {
+          if (scanCancelled) return;
+          if (!entry || !entry.id) continue;
+          const requiredScopes = getRequiredScopesForEntry(node, entry);
+          if (requiredScopes.length === 0) continue;
+          mergeScopeRequirement(
+            rawRequiredScopesByVariableId,
+            entry.id,
+            requiredScopes,
+          );
+          mergeScopeRequirement(
+            rawRequiredScopesByNodeVariableKey,
+            `${representativeNodeId}|${entry.id}`,
+            requiredScopes,
+          );
+        }
 
         for (const id of Object.keys(ids)) {
           if (scanCancelled) {
@@ -1258,15 +1600,18 @@ async function handleScan({ scope }) {
         }
         pendingNodeLevelIds.clear();
       }
-      if (now - lastProgressAt > PROGRESS_INTERVAL) {
+      if (now - lastProgressAt > STREAM_PROGRESS_INTERVAL) {
         const pct = 20 + Math.round((scannedNodes / allNodes.length) * 40);
-        figma.ui.postMessage({
-          type: "scan-progress",
-          message: `Scanned ${scannedNodes} / ${allNodes.length} nodes…`,
-          pct: Math.min(pct, 60),
-          scannedNodes,
-          totalNodes: allNodes.length,
-        });
+        const postedChunk = flushPendingScanChunk(scannedNodes);
+        if (!postedChunk) {
+          figma.ui.postMessage({
+            type: "scan-progress",
+            message: `Scanned ${scannedNodes} / ${allNodes.length} nodes…`,
+            pct: Math.min(pct, 60),
+            scannedNodes,
+            totalNodes: allNodes.length,
+          });
+        }
         lastProgressAt = now;
         await yieldTick();
         if (scanCancelled) {
@@ -1312,7 +1657,7 @@ async function handleScan({ scope }) {
       return;
     }
 
-// ── Step 5: Resolve variable IDs → metadata ──────────────────────────────
+    // ── Step 5: Resolve variable IDs → metadata ──────────────────────────────
     figma.ui.postMessage({
       type: "scan-progress",
       message: "Resolving variables…",
@@ -1345,11 +1690,32 @@ async function handleScan({ scope }) {
 
     figma.ui.postMessage({
       type: "scan-progress",
-      message: `Scanning… ${streamedVariableCount} variable${streamedVariableCount !== 1 ? "s" : ""} found`,
+      message: `Scanning… ${streamedVariableCount} variable${streamedVariableCount !== 1 ? "s" : ""} found${lightScanMode ? " (light scan mode)" : ""}`,
       pct: 84,
       scannedNodes: allNodes.length,
       totalNodes: allNodes.length,
     });
+
+    annotateDuplicateFlags(finalVariableInfo);
+    const requiredScopesByVariableId = finalizeScopeRequirements(
+      rawRequiredScopesByVariableId,
+      idRemap,
+    );
+    const requiredScopesByNodeVariableKey = finalizeScopeRequirements(
+      rawRequiredScopesByNodeVariableKey,
+      idRemap,
+      (rawKey, remap) => {
+        const splitIndex = rawKey.indexOf("|");
+        if (splitIndex === -1) {
+          return rawKey;
+        }
+        const nodeId = rawKey.slice(0, splitIndex);
+        const variableId = rawKey.slice(splitIndex + 1);
+        const canonicalVariableId = getCanonicalVariableId(variableId, remap);
+        if (!nodeId || !canonicalVariableId) return null;
+        return `${nodeId}|${canonicalVariableId}`;
+      },
+    );
 
     const uiVariableInfo = finalVariableInfo.map((v) => ({
       id: v.id,
@@ -1360,12 +1726,18 @@ async function handleScan({ scope }) {
       collectionName: v.collectionName,
       libraryName: v.libraryName,
       broken: !!v.broken,
+      isCrossCollectionDuplicate: !!v.isCrossCollectionDuplicate,
+      isCrossLibraryDuplicate: !!v.isCrossLibraryDuplicate,
+      isTypeConflict: !!v.isTypeConflict,
+      requiredScopes: requiredScopesByVariableId[v.id] || [],
     }));
 
     // ── Step 9: Build ID/key/name lookup maps ─────────────────────────────────
     figma.ui.postMessage({
       type: "scan-progress",
-      message: "Building lookup maps…",
+      message: lightScanMode
+        ? "Building lookup maps (light scan mode)…"
+        : "Building lookup maps…",
       pct: 90,
     });
 
@@ -1479,42 +1851,36 @@ async function handleScan({ scope }) {
 
     figma.ui.postMessage({
       type: "scan-progress",
-      message: "Done.",
+      message: lightScanMode ? "Done. Light scan mode used." : "Done.",
       pct: 100,
       scannedNodes: allNodes.length,
       totalNodes: allNodes.length,
     });
     setRelaunchForRoots(scope, roots);
 
-    if (pendingStreamedVariables.length > 0) {
-      figma.ui.postMessage({
-        type: "scan-chunk",
-        variables: encodeVariableRecords(pendingStreamedVariables),
-        nodeSummaryEntries: encodeSummaryEntries(pendingStreamedSummary),
-        stats: {
-          totalNodes: allNodes.length,
-          variableCount: streamedVariableCount,
-          discoveredCount: variableIdSet.size,
-          resolvedVariableCount,
-          scannedNodes: allNodes.length,
-        },
-      });
-    }
+    flushPendingScanChunk(allNodes.length, true);
 
     figma.ui.postMessage({
       type: "scan-complete",
       variables: encodeVariableRecords(uiVariableInfo),
       libraryCollections: remoteCollections.concat(localCollections),
+      lightScanMode,
       nodeSummaryEntries: encodeSummaryEntries(nodeSummaryByVariable),
       boundIdToKeyEntries: encodeLookupEntries(boundIdToKey),
       boundIdToNameEntries: encodeLookupEntries(boundIdToName),
-      boundIdToCollectionKeyEntries: encodeLookupEntries(boundIdToCollectionKey),
+      boundIdToCollectionKeyEntries: encodeLookupEntries(
+        boundIdToCollectionKey,
+      ),
       variableKeyToCollectionKeyEntries: encodeLookupEntries(
         variableKeyToCollectionKey,
       ),
       idRemapEntries: encodeLookupEntries(idRemap),
+      nodeScopeRequirementsEntries: encodeArrayLookupEntries(
+        requiredScopesByNodeVariableKey,
+      ),
       stats: {
         totalNodes: allNodes.length,
+        totalTraversed,
         hiddenLayerCount,
         brokenCount,
         variableCount: uiVariableInfo.length,
@@ -1578,6 +1944,7 @@ async function handleGetLibraryVariables({ collectionKey, isLocal, localId }) {
         key: v.key,
         name: v.name,
         resolvedType: v.resolvedType,
+        scopes: Array.isArray(v.scopes) ? [...v.scopes] : [],
         isLocal: true,
         localId: v.id,
       }));
@@ -1586,12 +1953,33 @@ async function handleGetLibraryVariables({ collectionKey, isLocal, localId }) {
         await figma.teamLibrary.getVariablesInLibraryCollectionAsync(
           collectionKey,
         );
-      variables = raw.map((v) => ({
-        key: v.key,
-        name: v.name,
-        resolvedType: v.resolvedType,
-        isLocal: false,
-      }));
+      variables = await pMap(
+        raw,
+        async (v) => {
+          let scopes = Array.isArray(v.scopes) ? [...v.scopes] : null;
+          if (!scopes) {
+            try {
+              const imported = await figma.variables.importVariableByKeyAsync(
+                v.key,
+              );
+              scopes = Array.isArray(imported && imported.scopes)
+                ? [...imported.scopes]
+                : [];
+            } catch (err) {
+              debugWarn("library variable scope resolution failed:", err);
+            }
+          }
+
+          return {
+            key: v.key,
+            name: v.name,
+            resolvedType: v.resolvedType,
+            scopes,
+            isLocal: false,
+          };
+        },
+        LOAD_CONCURRENCY,
+      );
     }
 
     figma.ui.postMessage({
@@ -1991,11 +2379,7 @@ async function handleRebind({
       });
     };
 
-    const applyOverrideToDescendants = (
-      node,
-      overrideKey,
-      targetVar,
-    ) => {
+    const applyOverrideToDescendants = (node, overrideKey, targetVar) => {
       if (!node || !("children" in node)) return;
       const stack = [];
       for (let i = node.children.length - 1; i >= 0; i--) {
@@ -2278,9 +2662,7 @@ async function handleRebind({
               for (let i = 0; i < paints.length; i++) {
                 const paint = paints[i];
                 const alias =
-                  paint &&
-                  paint.boundVariables &&
-                  paint.boundVariables.color;
+                  paint && paint.boundVariables && paint.boundVariables.color;
 
                 if (!alias || alias.type !== "VARIABLE_ALIAS") continue;
 
@@ -2385,7 +2767,9 @@ async function handleRebind({
                 if (canonicalAliasId) appliedEntryIds.add(canonicalAliasId);
                 if (verifiedEntry.id || verifiedEntry.rawId) {
                   appliedEntryIds.add(verifiedEntry.id || verifiedEntry.rawId);
-                  updatedVariableIds.add(verifiedEntry.id || verifiedEntry.rawId);
+                  updatedVariableIds.add(
+                    verifiedEntry.id || verifiedEntry.rawId,
+                  );
                 }
                 updatedVariableIds.add(canonicalAliasId || aliasId);
               }
@@ -2394,7 +2778,6 @@ async function handleRebind({
             if (nodeChanged) {
               reboundCount += appliedEntryIds.size;
             }
-
           } catch (err) {
             recordVariableError(
               fillEntries[0] && (fillEntries[0].id || fillEntries[0].rawId),
@@ -2485,64 +2868,65 @@ async function handleRebind({
                   ? node.getStyledTextSegments(["fills"])
                   : [];
               let segApplied = false;
-            for (const seg of segments) {
-              if (seg.start !== start || seg.end !== end) continue;
-              const paints = Array.isArray(seg.fills) ? [...seg.fills] : [];
-              const paintIndex = entry.index !== null ? entry.index : 0;
-              if (!paints[paintIndex]) continue;
-              paints[paintIndex] = figma.variables.setBoundVariableForPaint(
-                paints[paintIndex],
-                "color",
-                entry.targetVariable,
-              );
-              try {
-                node.setRangeFills(start, end, paints);
-              } catch (err) {
-                recordVariableError(
-                  entry.id || entry.rawId,
-                  `Node "${node.name}" field "${getApplyFailureField(entry.field, entry.segmentRange)}": ${String(err)}`,
+              for (const seg of segments) {
+                if (seg.start !== start || seg.end !== end) continue;
+                const paints = Array.isArray(seg.fills) ? [...seg.fills] : [];
+                const paintIndex = entry.index !== null ? entry.index : 0;
+                if (!paints[paintIndex]) continue;
+                paints[paintIndex] = figma.variables.setBoundVariableForPaint(
+                  paints[paintIndex],
+                  "color",
+                  entry.targetVariable,
                 );
-                continue;
+                try {
+                  node.setRangeFills(start, end, paints);
+                } catch (err) {
+                  recordVariableError(
+                    entry.id || entry.rawId,
+                    `Node "${node.name}" field "${getApplyFailureField(entry.field, entry.segmentRange)}": ${String(err)}`,
+                  );
+                  continue;
+                }
+                const applied = await verifyVariableApplication({
+                  node,
+                  field: entry.field,
+                  variableId: entry.targetVariable.id,
+                  sourceVariableId: entry.id || entry.rawId,
+                  segmentRange: entry.segmentRange,
+                  verify: () =>
+                    didTextSegmentVariableApply(
+                      node,
+                      start,
+                      end,
+                      paintIndex,
+                      entry.targetVariable.id,
+                    ),
+                  retryApply: async () => {
+                    const retrySegments =
+                      typeof node.getStyledTextSegments === "function"
+                        ? node.getStyledTextSegments(["fills"])
+                        : [];
+                    for (const retrySeg of retrySegments) {
+                      if (retrySeg.start !== start || retrySeg.end !== end)
+                        continue;
+                      const retryPaints = Array.isArray(retrySeg.fills)
+                        ? [...retrySeg.fills]
+                        : [];
+                      if (!retryPaints[paintIndex]) continue;
+                      retryPaints[paintIndex] =
+                        figma.variables.setBoundVariableForPaint(
+                          retryPaints[paintIndex],
+                          "color",
+                          entry.targetVariable,
+                        );
+                      node.setRangeFills(start, end, retryPaints);
+                      return;
+                    }
+                  },
+                });
+                if (!applied) continue;
+                segApplied = true;
               }
-              const applied = await verifyVariableApplication({
-                node,
-                field: entry.field,
-                variableId: entry.targetVariable.id,
-                sourceVariableId: entry.id || entry.rawId,
-                segmentRange: entry.segmentRange,
-                verify: () =>
-                  didTextSegmentVariableApply(
-                    node,
-                    start,
-                    end,
-                    paintIndex,
-                    entry.targetVariable.id,
-                  ),
-                retryApply: async () => {
-                  const retrySegments =
-                    typeof node.getStyledTextSegments === "function"
-                      ? node.getStyledTextSegments(["fills"])
-                      : [];
-                  for (const retrySeg of retrySegments) {
-                    if (retrySeg.start !== start || retrySeg.end !== end) continue;
-                    const retryPaints = Array.isArray(retrySeg.fills)
-                      ? [...retrySeg.fills]
-                      : [];
-                    if (!retryPaints[paintIndex]) continue;
-                    retryPaints[paintIndex] =
-                      figma.variables.setBoundVariableForPaint(
-                        retryPaints[paintIndex],
-                        "color",
-                        entry.targetVariable,
-                      );
-                    node.setRangeFills(start, end, retryPaints);
-                    return;
-                  }
-                },
-              });
-              if (!applied) continue;
-              segApplied = true;
-            }
               if (segApplied) {
                 reboundCount++;
                 nodeChanged = true;
@@ -2775,10 +3159,13 @@ async function handleRebind({
                     } catch (err) {
                       recordVariableError(
                         id || rawId,
-                        `Node "${node.name}" field "${getApplyFailureField(field, {
-                          start: seg.start,
-                          end: seg.end,
-                        })}": ${String(err)}`,
+                        `Node "${node.name}" field "${getApplyFailureField(
+                          field,
+                          {
+                            start: seg.start,
+                            end: seg.end,
+                          },
+                        )}": ${String(err)}`,
                       );
                       continue;
                     }
@@ -2932,8 +3319,7 @@ async function handleRebind({
                 field,
                 variableId: targetVariable.id,
                 sourceVariableId: id || rawId,
-                verify: () =>
-                  didVariableApply(node, field, targetVariable.id),
+                verify: () => didVariableApply(node, field, targetVariable.id),
                 retryApply: async () => {
                   const retryPaints = Array.isArray(node[field])
                     ? [...node[field]]
@@ -2958,8 +3344,7 @@ async function handleRebind({
                 field,
                 variableId: targetVariable.id,
                 sourceVariableId: id || rawId,
-                verify: () =>
-                  didVariableApply(node, field, targetVariable.id),
+                verify: () => didVariableApply(node, field, targetVariable.id),
                 retryApply: async () => {
                   node.setBoundVariable(field, targetVariable);
                 },

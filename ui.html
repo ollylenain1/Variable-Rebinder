@@ -341,6 +341,7 @@
         display: flex;
         flex-direction: column;
         gap: 16px;
+        overflow-anchor: none;
       }
 
       main::-webkit-scrollbar {
@@ -738,7 +739,7 @@
         text-transform: uppercase;
         letter-spacing: 0.12em;
         color: var(--text-dim);
-        margin-bottom: 6px;
+        margin-bottom: -8px;
       }
 
       /* ── Variable type groups ── */
@@ -784,11 +785,26 @@
         display: none;
       }
 
+      .var-group-window {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        overflow-anchor: none;
+      }
+
+      .var-group-spacer {
+        flex: 0 0 auto;
+        width: 100%;
+        pointer-events: none;
+        overflow-anchor: none;
+      }
+
       /* ── Variable Cards ── */
       .var-list {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 4px;
+        overflow-anchor: none;
       }
 
       .var-card {
@@ -1099,7 +1115,8 @@
         border: 0.5px solid var(--border);
         border-radius: var(--radius);
         padding: clamp(10px, 2.5vw, 14px);
-        margin-bottom: 2px;
+        margin-top: 8px;
+        margin-bottom: 16px;
         box-shadow: var(--shadow-sm);
         transition:
           border-color 0.18s ease,
@@ -1118,17 +1135,19 @@
         gap: clamp(6px, 1.5vw, 10px);
         cursor: pointer;
         user-select: none;
-        margin-bottom: 0;
         flex-wrap: wrap;
+      }
+      .bulk-remap-body {
+        padding-top: 10px;
       }
       .bulk-remap-body.collapsed {
         display: none;
       }
       .bulk-remap-row {
         display: flex;
-        gap: clamp(6px, 1.8vw, 10px);
+        gap: 10px;
         align-items: center;
-        margin-top: clamp(6px, 1.5vw, 8px);
+        margin-top: 8px;
         flex-wrap: wrap;
       }
       .inline-note {
@@ -1139,7 +1158,7 @@
       .toolbar-actions {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
       }
       .icon-no-pointer {
         pointer-events: none;
@@ -1176,12 +1195,12 @@
         margin-bottom: 0;
         display: flex;
         align-items: center;
-        gap: 5px;
         font-family: var(--font-heading);
         font-size: clamp(11px, 2.6vw, 12px);
         font-weight: 700;
         letter-spacing: -0.01em;
         color: var(--text);
+        line-height: 1.25;
       }
       .bulk-arrow {
         width: clamp(22px, 5vw, 26px);
@@ -1199,12 +1218,12 @@
       .bulk-remap-subtitle {
         font-size: clamp(10px, 2.4vw, 11px);
         color: var(--text-muted);
-        margin-left: 6px;
+        margin-left: 2px;
       }
       .bulk-remap-description {
         font-size: clamp(10px, 2.4vw, 11px);
         color: var(--text-muted);
-        margin-bottom: clamp(6px, 1.5vw, 8px);
+        margin-bottom: 10px;
         line-height: 1.5;
       }
       .select-wrap-fill {
@@ -1213,16 +1232,16 @@
       }
       .bulk-target-row {
         display: none;
-        margin-top: clamp(4px, 1vw, 6px);
+        margin-top: 8px;
       }
       .bulk-status {
         font-size: clamp(10px, 2.4vw, 11px);
         color: var(--text-muted);
-        margin-top: clamp(4px, 1vw, 6px);
+        margin-top: 8px;
         min-height: 18px;
       }
       .bulk-apply-btn {
-        margin-top: -4px;
+        margin-top: 0px;
       }
 
       /* ── Summary row ── */
@@ -2597,6 +2616,7 @@
         recentCollectionKeys: [],
         mappings: {},
         nodeMappings: {},
+        nodeScopeRequirements: {},
         nodeIdsByVariable: {},
         nodesByVariable: {},
         nodeDetailsById: {},
@@ -2611,6 +2631,7 @@
         variableGroups: {},
         sourceLibraries: [],
         sourceVariablesByCollectionId: {},
+        variableById: {},
         nodeSummaryByVariableId: {},
         brokenVariableCount: 0,
         nonBrokenVariableCount: 0,
@@ -2624,10 +2645,18 @@
         lastRebindResult: null,
         recentlyUpdatedVariableIds: {},
         justMappedVariableIds: {},
+        expandedVariableIds: {},
         scanInProgress: false,
         applyInProgress: false,
         scanStatus: null,
+        currentMainMode: "welcome",
         renderContext: null,
+        virtualization: {
+          itemHeights: {},
+          layoutVersion: 0,
+          pendingFrame: 0,
+          resizeObserver: null,
+        },
       };
 
       // ── DOM Refs ─────────────────────────────────────────────────────────────────
@@ -2643,8 +2672,6 @@
       const welcome = document.getElementById("welcome");
       const scopeButtons = Array.from(document.querySelectorAll(".scope-btn"));
       const themeButtons = Array.from(document.querySelectorAll(".theme-opt"));
-      let groupRenderObserver = null;
-      let groupChunkObserver = null;
       let recentUpdateResetTimer = null;
       let justMappedResetTimer = null;
       let usagesModalRef = null;
@@ -2752,11 +2779,6 @@
           .slice(0, 8);
       }
 
-      function getVariableLeafName(name) {
-        const parts = String(name || "").split("/");
-        return (parts[parts.length - 1] || "").trim();
-      }
-
       function getVariableSourceLabel(variable) {
         if (!variable) return "";
         if (variable.libraryName && variable.libraryName !== "This file") {
@@ -2777,6 +2799,10 @@
             collectionName: variable[5],
             libraryName: variable[6],
             broken: !!variable[7],
+            isCrossCollectionDuplicate: !!variable[8],
+            isCrossLibraryDuplicate: !!variable[9],
+            isTypeConflict: !!variable[10],
+            requiredScopes: Array.isArray(variable[11]) ? variable[11] : [],
           };
         }
         const pathSegments = String(variable.name || "")
@@ -2794,6 +2820,13 @@
           _typeBucket: variable.broken
             ? "BROKEN"
             : variable.resolvedType || "UNKNOWN",
+          scopes: Array.isArray(variable.scopes) ? variable.scopes : null,
+          requiredScopes: Array.isArray(variable.requiredScopes)
+            ? variable.requiredScopes
+            : [],
+          isCrossCollectionDuplicate: !!variable.isCrossCollectionDuplicate,
+          isCrossLibraryDuplicate: !!variable.isCrossLibraryDuplicate,
+          isTypeConflict: !!variable.isTypeConflict,
         });
       }
 
@@ -2823,6 +2856,16 @@
         entries.forEach((entry) => {
           if (!Array.isArray(entry) || entry.length < 2 || !entry[0]) return;
           decoded[entry[0]] = entry[1];
+        });
+        return decoded;
+      }
+
+      function decodeArrayLookupEntries(entries) {
+        if (!Array.isArray(entries)) return entries || {};
+        const decoded = {};
+        entries.forEach((entry) => {
+          if (!Array.isArray(entry) || entry.length < 2 || !entry[0]) return;
+          decoded[entry[0]] = Array.isArray(entry[1]) ? entry[1] : [];
         });
         return decoded;
       }
@@ -2999,16 +3042,14 @@
         });
       }
 
-      function disconnectGroupRenderObserver() {
-        if (groupRenderObserver) {
-          groupRenderObserver.disconnect();
-          groupRenderObserver = null;
-        }
-        if (groupChunkObserver) {
-          groupChunkObserver.disconnect();
-          groupChunkObserver = null;
-        }
+      function handleVirtualViewportChange() {
+        scheduleVirtualRender();
       }
+
+      mainEl.addEventListener("scroll", handleVirtualViewportChange, {
+        passive: true,
+      });
+      window.addEventListener("resize", handleVirtualViewportChange);
 
       function requestLibraryVariables(collectionKey, isLocal, localId) {
         if (!collectionKey || state.libraryVariableCache[collectionKey]) return;
@@ -3025,6 +3066,10 @@
           },
           "*",
         );
+      }
+
+      function invalidateVirtualLayout() {
+        state.virtualization.layoutVersion += 1;
       }
 
       function bumpMappingVersion() {
@@ -3055,6 +3100,7 @@
         state.pendingLibraryRequests = {};
         state.pendingVariableNodes = {};
         state.pendingSubSelects = {};
+        state.nodeScopeRequirements = {};
         state.nodeIdsByVariable = {};
         state.nodesByVariable = {};
         state.nodeDetailsById = {};
@@ -3068,6 +3114,7 @@
         state.variableGroups = createEmptyVariableGroups();
         state.sourceLibraries = [];
         state.sourceVariablesByCollectionId = {};
+        state.variableById = {};
         state.nodeSummaryByVariableId = {};
         state.nodeMappings = {};
         state.brokenVariableCount = 0;
@@ -3075,6 +3122,7 @@
         state.stats = null;
         state.renderContext = null;
         state.mappingSummaryCache = null;
+        invalidateVirtualLayout();
         if (usagesModalRef) {
           usagesModalRef.classList.remove("open");
           usagesModalRef._nodes = null;
@@ -3082,6 +3130,10 @@
       }
 
       function updateCachesForVariable(variable) {
+        if (variable && variable.id) {
+          state.variableById[variable.id] = variable;
+        }
+
         const type = variable._typeBucket || "UNKNOWN";
         if (!state.variableGroups[type]) state.variableGroups[type] = [];
         state.variableGroups[type].push(variable);
@@ -3126,7 +3178,13 @@
       function mergeScannedVariables(variables, nodeSummaryEntries, stats) {
         const normalizedVariables = normalizeVariableRecords(variables || []);
         const appendedVariables = [];
-        const seenIds = new Set(state.variables.map((variable) => variable.id));
+        const variableIndexById = {};
+
+        state.variables.forEach((variable, index) => {
+          if (variable && variable.id) {
+            variableIndexById[variable.id] = index;
+          }
+        });
 
         Object.assign(
           state.nodeSummaryByVariable,
@@ -3134,8 +3192,19 @@
         );
 
         normalizedVariables.forEach((variable) => {
-          if (!variable || seenIds.has(variable.id)) return;
-          seenIds.add(variable.id);
+          if (!variable) return;
+          const existingIndex = variableIndexById[variable.id];
+          if (typeof existingIndex === "number") {
+            const mergedVariable = Object.assign(
+              {},
+              state.variables[existingIndex],
+              variable,
+            );
+            state.variables[existingIndex] = mergedVariable;
+            state.variableById[mergedVariable.id] = mergedVariable;
+            return;
+          }
+          variableIndexById[variable.id] = state.variables.length;
           state.variables.push(variable);
           updateCachesForVariable(variable);
           appendedVariables.push(variable);
@@ -3164,6 +3233,7 @@
 
         const sourceLibs = [];
         const sourceVariablesByCollectionId = {};
+        const variableById = {};
         const nodeSummaryByVariableId = {};
         const seenLibs = new Set();
         let brokenCount = 0;
@@ -3182,6 +3252,10 @@
         );
 
         state.variables.forEach((variable) => {
+          if (variable && variable.id) {
+            variableById[variable.id] = variable;
+          }
+
           const type = variable._typeBucket;
           if (!groups[type]) groups[type] = [];
           groups[type].push(variable);
@@ -3220,6 +3294,7 @@
         state.variableGroups = groups;
         state.sourceLibraries = sourceLibs;
         state.sourceVariablesByCollectionId = sourceVariablesByCollectionId;
+        state.variableById = variableById;
         state.nodeSummaryByVariableId = nodeSummaryByVariableId;
         state.brokenVariableCount = brokenCount;
         state.nonBrokenVariableCount = nonBrokenCount;
@@ -3294,6 +3369,9 @@
         state.lastRebindResult = null;
         state.recentlyUpdatedVariableIds = {};
         state.justMappedVariableIds = {};
+        state.expandedVariableIds = {};
+        state.virtualization.itemHeights = {};
+        invalidateVirtualLayout();
         state.mappings = {};
         state.nodeMappings = {};
         state.scanned = true;
@@ -3404,6 +3482,10 @@
         setLoading(true, "Applying…");
         showProgress("Starting apply…", 0);
         rebindBtn.disabled = true;
+        if (state.currentMainMode === "list") {
+          updateScanApplyRegion();
+          updateSummary();
+        }
         parent.postMessage(
           {
             pluginMessage: {
@@ -3433,10 +3515,14 @@
               scannedNodes: msg.scannedNodes,
               totalNodes: msg.totalNodes,
             });
-            if (state.variables.length === 0 && state.scanInProgress) {
+            const nextViewMode = getMainViewMode();
+            if (nextViewMode !== state.currentMainMode) {
               renderMain();
+            } else if (nextViewMode === "scanning-empty") {
+              updateScanningEmptyState();
             } else {
               updateSummary();
+              updateScanApplyRegion();
             }
           }
           showProgress(msg.message, msg.pct);
@@ -3458,6 +3544,7 @@
           state.scanInProgress = true;
           state.banner = null;
           state.nodeMappings = {};
+          state.nodeScopeRequirements = {};
           state.mappingSummaryCache = null;
           if (usagesModalRef) {
             usagesModalRef.classList.remove("open");
@@ -3473,7 +3560,13 @@
             msg.stats || {},
           );
           state.libraryCollections = msg.libraryCollections || [];
-          renderMain();
+          if (getMainViewMode() !== state.currentMainMode) {
+            renderMain();
+          } else {
+            updateScanApplyRegion();
+            updateSummary();
+            updateListControlsRegion();
+          }
           updateRebindBtn();
           return;
         }
@@ -3489,14 +3582,16 @@
             state.scanStatus || {},
             msg.stats || {},
           );
-          if (!state.renderContext) {
+          if (getMainViewMode() !== state.currentMainMode) {
             renderMain();
           } else if (appendedVariables.length > 0) {
             appendVariablesToRenderedList(appendedVariables);
             updateSummary();
+            updateScanApplyRegion();
             updateRebindBtn();
           } else {
             updateSummary();
+            updateScanApplyRegion();
           }
           return;
         }
@@ -3523,13 +3618,25 @@
             msg.variableKeyToCollectionKeyEntries,
           );
           state.idRemap = decodeLookupEntries(msg.idRemapEntries);
+          state.nodeScopeRequirements = decodeArrayLookupEntries(
+            msg.nodeScopeRequirementsEntries,
+          );
           state.stats = msg.stats || state.stats;
           state.nodeMappings = {};
           if (usagesModalRef) {
             usagesModalRef.classList.remove("open");
             usagesModalRef._nodes = null;
           }
-          renderMain();
+          rebuildScanCaches();
+          if (getMainViewMode() !== state.currentMainMode) {
+            renderMain();
+          } else {
+            syncRenderedGroupsFromState();
+            updateScanApplyRegion();
+            updateSummary();
+            updateListControlsRegion();
+            rebuildVisibleVariableCards(null);
+          }
           rebindBtn.style.display = "inline-flex";
           resetBtn.style.display = "inline-flex";
           scanBtn.style.display = "inline-block";
@@ -3581,6 +3688,9 @@
             msg.variableKeyToCollectionKeyEntries,
           );
           state.idRemap = decodeLookupEntries(msg.idRemapEntries);
+          state.nodeScopeRequirements = decodeArrayLookupEntries(
+            msg.nodeScopeRequirementsEntries,
+          );
           state.stats = msg.stats || null;
           state.scanned = true;
           state.mappings = {};
@@ -3706,7 +3816,13 @@
             });
           }
           state.banner = null;
-          renderMain();
+          if (getMainViewMode() !== state.currentMainMode) {
+            renderMain();
+          } else {
+            updateScanApplyRegion();
+            updateSummary();
+            rebuildVisibleVariableCards(updatedVariableIds);
+          }
           updateRebindBtn();
         }
       };
@@ -3716,6 +3832,7 @@
         const renderContext = state.renderContext;
         if (
           !renderContext ||
+          renderContext.viewMode !== "list" ||
           !Array.isArray(variables) ||
           variables.length === 0
         ) {
@@ -3730,7 +3847,500 @@
               groupEntry.variables.length,
             );
           }
-          groupEntry.queueRender(true);
+          groupEntry.filteredVariables = getFilteredVariablesForGroup(
+            groupEntry.variables,
+            state.filterQuery,
+          );
+        });
+        scheduleVirtualRender(true);
+      }
+
+      function getMainViewMode() {
+        if (!state.scanned) return "welcome";
+        if (state.variables.length === 0 && state.scanInProgress) {
+          return "scanning-empty";
+        }
+        if (state.variables.length === 0) return "final-empty";
+        return "list";
+      }
+
+      function buildBannerElement(bannerState) {
+        if (!bannerState || !bannerState.text) return null;
+        const banner = document.createElement("div");
+        const icon = STATUS_ICONS[bannerState.type] || STATUS_ICONS.info;
+        banner.className = `banner banner-${bannerState.type || "info"}`;
+        banner.innerHTML =
+          icon + " <span>" + escHtml(bannerState.text) + "</span>";
+        return banner;
+      }
+
+      function getSummaryMarkup() {
+        const totalCount = state.variables.length;
+        const mappingSummary = getMappingSummary();
+        const mappedCount = mappingSummary.mappedVariableCount;
+        const nodeMappedCount = mappingSummary.nodeMappedCount;
+        const brokenCount = state.brokenVariableCount || 0;
+        const hiddenLayerTotal = state.stats ? state.stats.hiddenLayerCount : 0;
+        return `
+      <span class="stat-chip chip-total">${LINK_ICON} ${totalCount} variable${totalCount !== 1 ? "s" : ""} found</span>
+      ${state.scanInProgress ? `<span class="stat-chip chip-live"><span class="spinner spinner-compact"></span> Scanning…</span>` : ""}
+      ${mappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${mappedCount} variable${mappedCount !== 1 ? "s" : ""} ready</span>` : ""}
+      ${nodeMappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${nodeMappedCount} layer override${nodeMappedCount !== 1 ? "s" : ""}</span>` : ""}
+      ${hiddenLayerTotal > 0 ? `<span class="stat-chip chip-hidden" title="Hidden layers are included in scan and apply">${EYE_OFF_ICON} ${hiddenLayerTotal} hidden layer${hiddenLayerTotal !== 1 ? "s" : ""}</span>` : ""}
+      ${brokenCount > 0 ? `<span class="stat-chip chip-broken" title="Variables that could not be resolved — source library may be missing">${brokenCount} broken</span>` : ""}
+    `;
+      }
+
+      function getScanLiveNoteMarkup() {
+        const totalCount = state.variables.length;
+        const scanStatus = state.scanStatus || {};
+        const liveTotalNodes = scanStatus.totalNodes || 0;
+        const liveResolved = scanStatus.resolvedVariableCount || totalCount;
+        const liveDiscovered = scanStatus.discoveredCount || totalCount;
+        return `<span class="spinner spinner-compact"></span><span><strong>Scanning…</strong> ${totalCount} variable${totalCount !== 1 ? "s are" : " is"} ready so far${liveTotalNodes > 0 ? ` across ${liveTotalNodes} node${liveTotalNodes !== 1 ? "s" : ""}` : ""}. ${liveResolved > 0 ? `${liveResolved} of ${liveDiscovered} variable reference${liveDiscovered !== 1 ? "s" : ""} resolved.` : "Results will appear here as they are discovered."} You can start mapping now; apply unlocks when the scan finishes.</span>`;
+      }
+
+      function updateScanApplyRegion() {
+        const renderContext = state.renderContext;
+        if (
+          !renderContext ||
+          renderContext.viewMode !== "list" ||
+          !renderContext.regions ||
+          !renderContext.regions.banner
+        ) {
+          return;
+        }
+        const fragment = document.createDocumentFragment();
+        const bannerEl = buildBannerElement(state.banner);
+        if (bannerEl) fragment.appendChild(bannerEl);
+        if (state.scanInProgress) {
+          const liveNote = document.createElement("div");
+          liveNote.className = "scan-live-note";
+          liveNote.innerHTML = getScanLiveNoteMarkup();
+          fragment.appendChild(liveNote);
+        }
+        if (state.lastRebindResult) {
+          const resultPanel = renderApplyResult(state.lastRebindResult);
+          if (resultPanel) fragment.appendChild(resultPanel);
+        }
+        renderContext.regions.banner.replaceChildren(fragment);
+      }
+
+      function updateScanningEmptyState() {
+        if (state.currentMainMode !== "scanning-empty") return;
+        const emptyState = mainEl.querySelector(".scan-empty-state");
+        if (!emptyState) return;
+        const scanStatus = state.scanStatus || {};
+        const scannedNodes = scanStatus.scannedNodes || 0;
+        const totalNodes = scanStatus.totalNodes || 0;
+        const meta = emptyState.querySelector(".scan-empty-meta span");
+        if (meta) {
+          meta.textContent =
+            `${formatCount(scannedNodes)} node${scannedNodes !== 1 ? "s" : ""} scanned` +
+            (totalNodes > 0 ? ` of ${formatCount(totalNodes)}` : "");
+        }
+        const hintExists = !!emptyState.querySelector(".scan-empty-hint");
+        if (scannedNodes > 10000 && !hintExists) {
+          const hint = document.createElement("div");
+          hint.className = "scan-empty-hint";
+          hint.textContent =
+            "This file may not contain variables, or they may appear later in the scan.";
+          emptyState.insertBefore(
+            hint,
+            emptyState.querySelector(".scan-skeleton-list"),
+          );
+        }
+      }
+
+      function refreshRenderContextCollections(renderContext) {
+        if (!renderContext) return;
+        const orderedCollections = getOrderedLibraryCollections();
+        const collectionIndexByKey = {};
+        orderedCollections.forEach((collection, index) => {
+          collectionIndexByKey[collection.key] = index;
+        });
+        const libraryOptionsMarkup = orderedCollections
+          .map(
+            (c, i) =>
+              `<option value="${i}">${escHtml(c.libraryName)} → ${escHtml(c.name)}</option>`,
+          )
+          .join("");
+        renderContext.orderedCollections = orderedCollections;
+        renderContext.collectionIndexByKey = collectionIndexByKey;
+        renderContext.libraryOptionsMarkup = libraryOptionsMarkup;
+        renderContext.nodeLibraryOptionsMarkup =
+          '<option value="">— override: choose library —</option>' +
+          libraryOptionsMarkup;
+      }
+
+      function updateListControlsRegion() {
+        const renderContext = state.renderContext;
+        if (
+          !renderContext ||
+          renderContext.viewMode !== "list" ||
+          !renderContext.regions ||
+          !renderContext.regions.controls
+        ) {
+          return;
+        }
+        refreshRenderContextCollections(renderContext);
+        const fragment = document.createDocumentFragment();
+        const filterDiv = document.createElement("div");
+        filterDiv.className = "filter-bar";
+        filterDiv.innerHTML = `<input class="search-input" id="searchInput" placeholder="Filter variables…" />`;
+        fragment.appendChild(filterDiv);
+
+        if (
+          state.nonBrokenVariableCount > 0 &&
+          state.libraryCollections.length > 0
+        ) {
+          fragment.appendChild(buildBulkRemapPanel());
+        }
+
+        const sectionTitle = document.createElement("div");
+        sectionTitle.className = "section-title";
+        sectionTitle.textContent = "Found Variables";
+        fragment.appendChild(sectionTitle);
+
+        renderContext.regions.controls.replaceChildren(fragment);
+        const searchInput =
+          renderContext.regions.controls.querySelector("#searchInput");
+        if (searchInput) {
+          searchInput.value = state.filterQuery || "";
+          searchInput.addEventListener("input", (e) => {
+            state.filterQuery = e.target.value.toLowerCase();
+            if (renderContext.filterFrame)
+              cancelAnimationFrame(renderContext.filterFrame);
+            renderContext.filterFrame = requestAnimationFrame(() => {
+              applyVariableFilter(state.filterQuery);
+              renderContext.filterFrame = null;
+            });
+          });
+        }
+      }
+
+      function rebuildVisibleVariableCards(variableIds) {
+        const renderContext = state.renderContext;
+        if (!renderContext || renderContext.viewMode !== "list") return;
+        if (variableIds == null) {
+          renderContext.rebuildAllVisibleCards = true;
+        } else {
+          if (!renderContext.pendingCardRefreshIds) {
+            renderContext.pendingCardRefreshIds = new Set();
+          }
+          variableIds.forEach((variableId) =>
+            renderContext.pendingCardRefreshIds.add(variableId),
+          );
+        }
+        scheduleVirtualRender(true);
+      }
+
+      function syncRenderedGroupsFromState() {
+        const renderContext = state.renderContext;
+        if (!renderContext || renderContext.viewMode !== "list") return;
+        Object.entries(renderContext.groupEntries || {}).forEach(
+          ([type, groupEntry]) => {
+            if (!groupEntry) return;
+            groupEntry.variables = state.variableGroups[type] || [];
+            groupEntry.filteredVariables = getFilteredVariablesForGroup(
+              groupEntry.variables,
+              state.filterQuery,
+            );
+            if (groupEntry.countEl) {
+              groupEntry.countEl.textContent = String(
+                groupEntry.filteredVariables.length,
+              );
+            }
+            if (groupEntry.container) {
+              groupEntry.container.style.display = "";
+              groupEntry.container.classList.toggle(
+                "hidden",
+                groupEntry.filteredVariables.length === 0,
+              );
+            }
+          },
+        );
+      }
+
+      function getFilteredVariablesForGroup(variables, query) {
+        const q = (query || "").trim().toLowerCase();
+        if (!q) return variables;
+        return variables.filter((variable) =>
+          (variable._searchText || "").includes(q),
+        );
+      }
+
+      function getEstimatedVariableCardHeight(variable) {
+        const measured = state.virtualization.itemHeights[variable.id];
+        if (measured) return measured;
+
+        const errorCount = (state.variableErrorsById[variable.id] || []).length;
+        const collapsedHeight = errorCount > 0 ? 104 : 58;
+        return state.expandedVariableIds[variable.id]
+          ? collapsedHeight + 182
+          : collapsedHeight;
+      }
+
+      function buildVirtualLayoutMetrics(variables) {
+        const offsets = new Array(variables.length + 1);
+        let totalHeight = 0;
+        offsets[0] = 0;
+        for (let i = 0; i < variables.length; i++) {
+          totalHeight += getEstimatedVariableCardHeight(variables[i]);
+          offsets[i + 1] = totalHeight;
+        }
+        return { offsets, totalHeight };
+      }
+
+      function getVirtualLayoutMetrics(groupEntry, variables) {
+        if (!groupEntry) {
+          return { offsets: [0], totalHeight: 0 };
+        }
+        const layoutVersion = state.virtualization.layoutVersion;
+        const cache = groupEntry.layoutMetrics;
+        if (
+          cache &&
+          cache.variables === variables &&
+          cache.variableCount === variables.length &&
+          cache.layoutVersion === layoutVersion
+        ) {
+          return cache;
+        }
+
+        const nextMetrics = buildVirtualLayoutMetrics(variables);
+        nextMetrics.variables = variables;
+        nextMetrics.variableCount = variables.length;
+        nextMetrics.layoutVersion = layoutVersion;
+        groupEntry.layoutMetrics = nextMetrics;
+        return nextMetrics;
+      }
+
+      function findVirtualOffsetIndex(offsets, targetOffset) {
+        let low = 0;
+        let high = offsets.length - 1;
+        while (low < high) {
+          const mid = Math.floor((low + high + 1) / 2);
+          if (offsets[mid] <= targetOffset) {
+            low = mid;
+          } else {
+            high = mid - 1;
+          }
+        }
+        return low;
+      }
+
+      function ensureVirtualResizeObserver() {
+        if (
+          state.virtualization.resizeObserver ||
+          typeof ResizeObserver === "undefined"
+        ) {
+          return;
+        }
+
+        state.virtualization.resizeObserver = new ResizeObserver((entries) => {
+          let changed = false;
+          entries.forEach((entry) => {
+            const variableId = entry.target.dataset.varid;
+            if (!variableId) return;
+            const nextHeight = Math.max(
+              1,
+              Math.round(
+                entry.borderBoxSize?.[0]?.blockSize || entry.contentRect.height,
+              ),
+            );
+            if (state.virtualization.itemHeights[variableId] !== nextHeight) {
+              state.virtualization.itemHeights[variableId] = nextHeight;
+              changed = true;
+            }
+          });
+          if (changed) {
+            invalidateVirtualLayout();
+            scheduleVirtualRender();
+          }
+        });
+      }
+
+      function scheduleVirtualRender(force) {
+        const renderContext = state.renderContext;
+        if (!renderContext || !renderContext.groupEntries) return;
+        if (force) renderContext.forceVirtualRender = true;
+        if (state.virtualization.pendingFrame) return;
+        state.virtualization.pendingFrame = requestAnimationFrame(() => {
+          state.virtualization.pendingFrame = 0;
+          if (state.renderContext !== renderContext) return;
+          renderVirtualizedGroups(!!renderContext.forceVirtualRender);
+          renderContext.forceVirtualRender = false;
+          renderContext.rebuildAllVisibleCards = false;
+          if (renderContext.pendingCardRefreshIds) {
+            renderContext.pendingCardRefreshIds.clear();
+          }
+        });
+      }
+
+      function getVisibleVariableRange(offsets, startOffset, endOffset) {
+        const length = offsets.length - 1;
+        if (length === 0 || endOffset <= 0) {
+          return { startIndex: 0, endIndex: 0 };
+        }
+
+        const clampedStart = Math.max(0, startOffset);
+        const clampedEnd = Math.max(clampedStart, endOffset);
+        let startIndex = findVirtualOffsetIndex(offsets, clampedStart);
+        if (startIndex >= length) startIndex = length - 1;
+
+        let endIndex = findVirtualOffsetIndex(offsets, clampedEnd);
+        if (endIndex < length && offsets[endIndex] < clampedEnd) {
+          endIndex += 1;
+        }
+
+        const overscan = 4;
+        startIndex = Math.max(0, startIndex - overscan);
+        endIndex = Math.min(
+          length,
+          Math.max(endIndex + overscan, startIndex + 1),
+        );
+        return { startIndex, endIndex };
+      }
+
+      function renderVirtualizedGroups(force) {
+        const renderContext = state.renderContext;
+        if (!renderContext || !renderContext.groupEntries) return;
+        const pendingCardRefreshIds =
+          renderContext.pendingCardRefreshIds || new Set();
+
+        ensureVirtualResizeObserver();
+
+        const mainRect = mainEl.getBoundingClientRect();
+        const viewportTop = mainRect.top - 240;
+        const viewportBottom = mainRect.bottom + 240;
+
+        Object.values(renderContext.groupEntries).forEach((groupEntry) => {
+          if (!groupEntry || !groupEntry.body) return;
+
+          const activeVariables = groupEntry.filteredVariables || [];
+          if (
+            !activeVariables.length ||
+            groupEntry.body.classList.contains("collapsed") ||
+            groupEntry.container.classList.contains("hidden")
+          ) {
+            if (
+              state.virtualization.resizeObserver &&
+              Array.isArray(groupEntry.renderedCards)
+            ) {
+              groupEntry.renderedCards.forEach((card) => {
+                state.virtualization.resizeObserver.unobserve(card);
+              });
+            }
+            if (groupEntry.topSpacer) groupEntry.topSpacer.style.height = "0px";
+            if (groupEntry.bottomSpacer)
+              groupEntry.bottomSpacer.style.height = "0px";
+            if (groupEntry.windowEl) groupEntry.windowEl.replaceChildren();
+            groupEntry.renderedCards = [];
+            groupEntry.renderRange = { startIndex: 0, endIndex: 0 };
+            groupEntry.layoutMetrics = null;
+            return;
+          }
+
+          const layoutMetrics = getVirtualLayoutMetrics(
+            groupEntry,
+            activeVariables,
+          );
+          const { offsets, totalHeight } = layoutMetrics;
+
+          const bodyRect = groupEntry.body.getBoundingClientRect();
+          const startOffset = Math.max(0, viewportTop - bodyRect.top);
+          const endOffset = Math.min(
+            totalHeight,
+            viewportBottom - bodyRect.top,
+          );
+          const { startIndex, endIndex } = getVisibleVariableRange(
+            offsets,
+            startOffset,
+            endOffset,
+          );
+
+          const sameRange =
+            groupEntry.renderRange &&
+            groupEntry.renderRange.startIndex === startIndex &&
+            groupEntry.renderRange.endIndex === endIndex;
+          const visibleVariables = activeVariables.slice(startIndex, endIndex);
+          const hasVisibleRefresh =
+            renderContext.rebuildAllVisibleCards ||
+            visibleVariables.some((variable) =>
+              pendingCardRefreshIds.has(variable.id),
+            );
+
+          const beforeHeight = offsets[startIndex] || 0;
+          const renderedHeight = (offsets[endIndex] || 0) - beforeHeight;
+          const afterHeight = Math.max(
+            0,
+            totalHeight - beforeHeight - renderedHeight,
+          );
+
+          groupEntry.topSpacer.style.height = `${Math.round(beforeHeight)}px`;
+          groupEntry.bottomSpacer.style.height = `${Math.round(afterHeight)}px`;
+
+          if (sameRange && !force && !hasVisibleRefresh) return;
+
+          const existingCardsById = new Map();
+          Array.from(groupEntry.windowEl.children).forEach((card) => {
+            if (card.dataset.varid)
+              existingCardsById.set(card.dataset.varid, card);
+          });
+          const nextRenderedCards = [];
+          const nextRenderedIds = new Set();
+
+          visibleVariables.forEach((variable, index) => {
+            const shouldRebuildCard =
+              renderContext.rebuildAllVisibleCards ||
+              pendingCardRefreshIds.has(variable.id);
+            let card = existingCardsById.get(variable.id) || null;
+            if (!card || shouldRebuildCard) {
+              const replacement = buildVarCard(
+                variable,
+                renderContext.orderedCollections,
+                renderContext.collectionIndexByKey,
+                renderContext.libraryOptionsMarkup,
+                renderContext.nodeLibraryOptionsMarkup,
+              );
+              if (card && card.parentNode === groupEntry.windowEl) {
+                if (state.virtualization.resizeObserver) {
+                  state.virtualization.resizeObserver.unobserve(card);
+                }
+                groupEntry.windowEl.replaceChild(replacement, card);
+              }
+              card = replacement;
+              if (
+                state.scanInProgress &&
+                renderContext.renderToken === state.renderToken &&
+                !existingCardsById.has(variable.id)
+              ) {
+                card.classList.add("new-discovery");
+                setTimeout(() => card.classList.remove("new-discovery"), 280);
+              }
+            }
+            const currentAtIndex = groupEntry.windowEl.children[index];
+            if (currentAtIndex !== card) {
+              groupEntry.windowEl.insertBefore(card, currentAtIndex || null);
+            }
+            nextRenderedCards.push(card);
+            nextRenderedIds.add(variable.id);
+            if (state.virtualization.resizeObserver) {
+              state.virtualization.resizeObserver.observe(card);
+            }
+          });
+
+          Array.from(groupEntry.windowEl.children).forEach((card) => {
+            if (!nextRenderedIds.has(card.dataset.varid)) {
+              if (state.virtualization.resizeObserver) {
+                state.virtualization.resizeObserver.unobserve(card);
+              }
+              card.remove();
+            }
+          });
+
+          groupEntry.renderedCards = nextRenderedCards;
+          groupEntry.renderRange = { startIndex, endIndex };
         });
       }
 
@@ -3825,96 +4435,35 @@
       }
 
       function renderMain() {
-        disconnectGroupRenderObserver();
         mainEl.innerHTML = "";
         state.filterIndex = [];
         state.renderContext = null;
         state.renderToken += 1;
         const renderToken = state.renderToken;
 
-        if (!state.scanned) {
+        const viewMode = getMainViewMode();
+        state.currentMainMode = viewMode;
+
+        if (viewMode === "welcome") {
           mainEl.appendChild(welcome);
           return;
         }
 
         const fragment = document.createDocumentFragment();
-        if (state.banner && state.banner.text) {
-          const banner = document.createElement("div");
-          const icon = STATUS_ICONS[state.banner.type] || STATUS_ICONS.info;
-          banner.className = `banner banner-${state.banner.type || "info"}`;
-          banner.innerHTML =
-            icon + " <span>" + escHtml(state.banner.text) + "</span>";
-          fragment.appendChild(banner);
-        }
+        const bannerEl = buildBannerElement(state.banner);
+        if (bannerEl) fragment.appendChild(bannerEl);
 
-        if (state.variables.length === 0 && state.scanInProgress) {
+        if (viewMode === "scanning-empty") {
           fragment.appendChild(buildScanningEmptyState());
           mainEl.appendChild(fragment);
           return;
         }
 
-        if (state.variables.length === 0 && !state.scanInProgress) {
+        if (viewMode === "final-empty") {
           fragment.appendChild(buildFinalEmptyState());
           mainEl.appendChild(fragment);
           return;
         }
-
-        // Summary chips
-        const totalCount = state.variables.length;
-        const mappingSummary = getMappingSummary();
-        const mappedCount = mappingSummary.mappedVariableCount;
-        const nodeMappedCount = mappingSummary.nodeMappedCount;
-        const brokenCount = state.brokenVariableCount || 0;
-        const hiddenLayerTotal = state.stats ? state.stats.hiddenLayerCount : 0;
-
-        const summaryDiv = document.createElement("div");
-        summaryDiv.className =
-          "summary-row" + (state.lastRebindResult ? " summary-row-secondary" : "");
-        summaryDiv.innerHTML = `
-    <span class="stat-chip chip-total">${LINK_ICON} ${totalCount} variable${totalCount !== 1 ? "s" : ""} found</span>
-    ${state.scanInProgress ? `<span class="stat-chip chip-live"><span class="spinner spinner-compact"></span> Scanning…</span>` : ""}
-    ${mappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${mappedCount} variable${mappedCount !== 1 ? "s" : ""} ready</span>` : ""}
-    ${nodeMappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${nodeMappedCount} layer override${nodeMappedCount !== 1 ? "s" : ""}</span>` : ""}
-    ${hiddenLayerTotal > 0 ? `<span class="stat-chip chip-hidden" title="Hidden layers are included in scan and apply">${EYE_OFF_ICON} ${hiddenLayerTotal} hidden layer${hiddenLayerTotal !== 1 ? "s" : ""}</span>` : ""}
-    ${brokenCount > 0 ? `<span class="stat-chip chip-broken" title="Variables that could not be resolved — source library may be missing">${brokenCount} broken</span>` : ""}
-  `;
-        fragment.appendChild(summaryDiv);
-
-        if (state.scanInProgress) {
-          const liveNote = document.createElement("div");
-          const scanStatus = state.scanStatus || {};
-          const liveTotalNodes = scanStatus.totalNodes || 0;
-          const liveResolved = scanStatus.resolvedVariableCount || totalCount;
-          const liveDiscovered = scanStatus.discoveredCount || totalCount;
-          liveNote.className = "scan-live-note";
-          liveNote.innerHTML = `<span class="spinner spinner-compact"></span><span><strong>Scanning…</strong> ${totalCount} variable${totalCount !== 1 ? "s are" : " is"} ready so far${liveTotalNodes > 0 ? ` across ${liveTotalNodes} node${liveTotalNodes !== 1 ? "s" : ""}` : ""}. ${liveResolved > 0 ? `${liveResolved} of ${liveDiscovered} variable reference${liveDiscovered !== 1 ? "s" : ""} resolved.` : "Results will appear here as they are discovered."} You can start mapping now; apply unlocks when the scan finishes.</span>`;
-          fragment.appendChild(liveNote);
-        }
-
-        if (state.lastRebindResult) {
-          const resultPanel = renderApplyResult(state.lastRebindResult);
-          if (resultPanel) fragment.appendChild(resultPanel);
-        }
-
-        // Filter bar
-        const filterDiv = document.createElement("div");
-        filterDiv.className = "filter-bar";
-        filterDiv.innerHTML = `<input class="search-input" id="searchInput" placeholder="Filter variables…" />`;
-        fragment.appendChild(filterDiv);
-
-        // Bulk remap panel
-        if (
-          state.nonBrokenVariableCount > 0 &&
-          state.libraryCollections.length > 0
-        ) {
-          fragment.appendChild(buildBulkRemapPanel());
-        }
-
-        // Section header
-        const sectionTitle = document.createElement("div");
-        sectionTitle.className = "section-title";
-        sectionTitle.textContent = "Found Variables";
-        fragment.appendChild(sectionTitle);
 
         // Group variables by resolvedType — broken get their own group
         const TYPE_ORDER = [
@@ -3935,124 +4484,13 @@
         };
         const groups = state.variableGroups || {};
 
+        const bannerRegion = document.createElement("div");
+        const summaryRegion = document.createElement("div");
+        const controlsRegion = document.createElement("div");
         const listDiv = document.createElement("div");
         listDiv.className = "var-list";
         listDiv.id = "varList";
         const filterIndex = [];
-        const orderedCollections = getOrderedLibraryCollections();
-        const collectionIndexByKey = {};
-        orderedCollections.forEach((collection, index) => {
-          collectionIndexByKey[collection.key] = index;
-        });
-        const libraryOptionsMarkup = orderedCollections
-          .map(
-            (c, i) =>
-              `<option value="${i}">${escHtml(c.libraryName)} → ${escHtml(c.name)}</option>`,
-          )
-          .join("");
-        const nodeLibraryOptionsMarkup =
-          '<option value="">— override: choose library —</option>' +
-          libraryOptionsMarkup;
-        let filterFrame = null;
-        const pendingGroups = [];
-        let renderScheduled = false;
-
-        const queueGroupRender = (groupEntry, forceFull) => {
-          if (
-            !groupEntry ||
-            groupEntry.renderedCount >= groupEntry.variables.length
-          ) {
-            return;
-          }
-          if (forceFull) groupEntry.renderAll = true;
-          if (groupEntry.queued) return;
-          groupEntry.queued = true;
-          pendingGroups.push(groupEntry);
-          if (!renderScheduled) {
-            renderScheduled = true;
-            requestAnimationFrame(flushGroupRenderQueue);
-          }
-        };
-
-        const renderGroupCards = (groupEntry, limit) => {
-          if (
-            !groupEntry ||
-            groupEntry.renderedCount >= groupEntry.variables.length
-          ) {
-            return 0;
-          }
-          const end = Math.min(limit, groupEntry.variables.length);
-          if (end <= groupEntry.renderedCount) return 0;
-          const startCount = groupEntry.renderedCount;
-
-          const fragment = document.createDocumentFragment();
-          for (; groupEntry.renderedCount < end; groupEntry.renderedCount++) {
-            const variable = groupEntry.variables[groupEntry.renderedCount];
-            const card = buildVarCard(
-              variable,
-              orderedCollections,
-              collectionIndexByKey,
-              libraryOptionsMarkup,
-              nodeLibraryOptionsMarkup,
-            );
-            if (state.scanInProgress) {
-              card.classList.add("new-discovery");
-              setTimeout(() => card.classList.remove("new-discovery"), 280);
-            }
-            groupEntry.cards.push(card);
-            fragment.appendChild(card);
-          }
-          groupEntry.body.appendChild(fragment);
-          if (groupEntry.sentinel) {
-            groupEntry.body.appendChild(groupEntry.sentinel);
-            if (
-              groupChunkObserver &&
-              groupEntry.renderedCount < groupEntry.variables.length
-            ) {
-              groupChunkObserver.observe(groupEntry.sentinel);
-            } else if (groupChunkObserver) {
-              groupChunkObserver.unobserve(groupEntry.sentinel);
-            }
-          }
-          return groupEntry.renderedCount - startCount;
-        };
-
-        const flushGroupRenderQueue = () => {
-          renderScheduled = false;
-          if (renderToken !== state.renderToken) return;
-
-          let renderedThisFrame = 0;
-          while (pendingGroups.length > 0 && renderedThisFrame < 24) {
-            const groupEntry = pendingGroups.shift();
-            groupEntry.queued = false;
-            if (groupEntry.renderedCount >= groupEntry.variables.length)
-              continue;
-
-            const remainingBudget = 24 - renderedThisFrame;
-            const targetCount = groupEntry.renderAll
-              ? groupEntry.renderedCount + remainingBudget
-              : groupEntry.renderedCount + Math.min(12, remainingBudget);
-            const previousCount = groupEntry.renderedCount;
-            renderGroupCards(groupEntry, targetCount);
-            renderedThisFrame += groupEntry.renderedCount - previousCount;
-
-            if (
-              groupEntry.renderedCount < groupEntry.variables.length &&
-              groupEntry.renderAll
-            ) {
-              queueGroupRender(groupEntry, groupEntry.renderAll);
-            }
-          }
-
-          if (state.filterQuery) {
-            applyVariableFilter(state.filterQuery);
-          }
-          if (pendingGroups.length > 0 && !renderScheduled) {
-            renderScheduled = true;
-            requestAnimationFrame(flushGroupRenderQueue);
-          }
-        };
-
         const groupEntriesByType = {};
 
         for (const type of TYPE_ORDER) {
@@ -4085,21 +4523,25 @@
             body: groupBody,
             container: groupContainer,
             countEl,
-            cards: [],
             variables: vars,
+            filteredVariables: getFilteredVariablesForGroup(
+              vars,
+              state.filterQuery,
+            ),
             chevron,
-            renderedCount: 0,
-            queued: false,
-            renderAll: false,
-            sentinel: null,
+            renderedCards: [],
+            renderRange: null,
+            layoutMetrics: null,
+            topSpacer: document.createElement("div"),
+            windowEl: document.createElement("div"),
+            bottomSpacer: document.createElement("div"),
           };
-          groupEntry.queueRender = (forceFull) =>
-            queueGroupRender(groupEntry, !!forceFull);
-          groupEntry.sentinel = document.createElement("div");
-          groupEntry.sentinel.className = "var-group-sentinel";
-          groupEntry.sentinel.style.height = "1px";
-          groupEntry.sentinel.style.pointerEvents = "none";
-          groupEntry.sentinel._groupEntry = groupEntry;
+          groupEntry.topSpacer.className = "var-group-spacer";
+          groupEntry.windowEl.className = "var-group-window";
+          groupEntry.bottomSpacer.className = "var-group-spacer";
+          groupBody.appendChild(groupEntry.topSpacer);
+          groupBody.appendChild(groupEntry.windowEl);
+          groupBody.appendChild(groupEntry.bottomSpacer);
 
           filterIndex.push(groupEntry);
           groupEntriesByType[type] = groupEntry;
@@ -4107,6 +4549,7 @@
           groupHeader.addEventListener("click", () => {
             const collapsed = groupBody.classList.toggle("collapsed");
             if (chevron) chevron.textContent = collapsed ? "▸" : "▾";
+            scheduleVirtualRender(true);
           });
 
           groupContainer.appendChild(groupHeader);
@@ -4114,115 +4557,51 @@
           listDiv.appendChild(groupContainer);
         }
 
+        fragment.appendChild(bannerRegion);
+        fragment.appendChild(summaryRegion);
+        fragment.appendChild(controlsRegion);
         fragment.appendChild(listDiv);
         mainEl.appendChild(fragment);
         state.filterIndex = filterIndex;
-        const searchInput = document.getElementById("searchInput");
-        if (searchInput) searchInput.value = state.filterQuery || "";
-
-        // Search filter
-        if (searchInput) {
-          searchInput.addEventListener("input", (e) => {
-            state.filterQuery = e.target.value.toLowerCase();
-            if (filterFrame) cancelAnimationFrame(filterFrame);
-            filterFrame = requestAnimationFrame(() => {
-              applyVariableFilter(state.filterQuery);
-              filterFrame = null;
-            });
-          });
-        }
-
-        if (window.IntersectionObserver) {
-          groupChunkObserver = new IntersectionObserver(
-            (entries) => {
-              entries.forEach((entry) => {
-                if (!entry.isIntersecting) return;
-                const groupEntry = entry.target._groupEntry;
-                if (!groupEntry || groupEntry.renderAll) return;
-                if (groupEntry.renderedCount >= groupEntry.variables.length) {
-                  groupChunkObserver.unobserve(entry.target);
-                  return;
-                }
-                queueGroupRender(groupEntry, false);
-              });
-            },
-            {
-              root: mainEl,
-              rootMargin: "0px 0px 320px 0px",
-              threshold: 0,
-            },
-          );
-          groupRenderObserver = new IntersectionObserver(
-            (entries) => {
-              entries.forEach((entry) => {
-                if (!entry.isIntersecting) return;
-                const groupEntry = entry.target._groupEntry;
-                if (!groupEntry) return;
-                queueGroupRender(groupEntry, false);
-                groupRenderObserver.unobserve(entry.target);
-              });
-            },
-            {
-              root: mainEl,
-              rootMargin: "160px 0px 220px 0px",
-              threshold: 0,
-            },
-          );
-          filterIndex.forEach((groupEntry) => {
-            groupEntry.header._groupEntry = groupEntry;
-            groupRenderObserver.observe(groupEntry.header);
-          });
-        } else {
-          filterIndex.forEach((groupEntry) => {
-            queueGroupRender(groupEntry, true);
-          });
-        }
-
-        if (filterIndex[0]) {
-          queueGroupRender(filterIndex[0], false);
-        }
-
-        if (state.filterQuery) {
-          applyVariableFilter(state.filterQuery);
-        }
         state.renderContext = {
+          viewMode,
+          regions: {
+            banner: bannerRegion,
+            summary: summaryRegion,
+            controls: controlsRegion,
+            list: listDiv,
+          },
           groupEntries: groupEntriesByType,
+          renderToken,
+          forceVirtualRender: false,
+          rebuildAllVisibleCards: false,
+          pendingCardRefreshIds: new Set(),
+          filterFrame: null,
         };
+        updateScanApplyRegion();
+        updateSummary();
+        updateListControlsRegion();
+        if (state.filterQuery) applyVariableFilter(state.filterQuery);
+        scheduleVirtualRender(true);
       }
 
       function applyVariableFilter(query) {
         const q = (query || "").toLowerCase();
-        const hasQuery = q.length > 0;
         (state.filterIndex || []).forEach((group) => {
-          let expectedVisibleCount = group.variables.length;
-          if (hasQuery) {
-            if (group.renderedCount < group.variables.length) {
-              group.renderAll = true;
-              if (group.queueRender) group.queueRender(true);
-            }
-            expectedVisibleCount = 0;
-            group.variables.forEach((variable) => {
-              if ((variable._searchText || "").includes(q))
-                expectedVisibleCount++;
-            });
+          group.filteredVariables = getFilteredVariablesForGroup(
+            group.variables,
+            q,
+          );
+          const visibleCount = group.filteredVariables.length;
+          if (group.countEl) {
+            group.countEl.textContent = String(visibleCount);
           }
-          let visibleCount = 0;
-          group.cards.forEach((card) => {
-            const text = card.dataset.search || "";
-            const isHidden = hasQuery && !text.includes(q);
-            card.classList.toggle("hidden", isHidden);
-            if (!isHidden) visibleCount++;
-          });
-          const allHidden = hasQuery
-            ? expectedVisibleCount === 0
-            : visibleCount === 0;
+          const allHidden = visibleCount === 0;
           if (group.container) {
             group.container.classList.toggle("hidden", allHidden);
-          } else {
-            group.header.classList.toggle("hidden", allHidden);
-            group.body.classList.toggle("hidden", allHidden);
           }
         });
+        scheduleVirtualRender(true);
       }
 
       /**
@@ -4240,7 +4619,7 @@
         header.className = "bulk-remap-header";
         header.innerHTML = `
     <span class="var-group-chevron" id="bulkChevron">▸</span>
-    <span class="bulk-remap-title">Bulk Remap by Library</span>
+       <span class="bulk-remap-title">Bulk Remap by Library</span>
     <span class="bulk-remap-subtitle">Map all variables from one library at once</span>
   `;
 
@@ -4824,24 +5203,27 @@
         overlay._render();
         overlay.classList.add("open");
 
+        // Node IDs and details are normally pre-fetched when the card is
+        // expanded (see ensureCardBodyInitialized). We only need to fetch here
+        // if that hasn't happened yet (e.g. card was pre-expanded on initial
+        // render and the background fetch hasn't completed yet).
         if (!overlay._nodeIds) {
           requestVariableNodes(variable.id, (nodeIds) => {
             overlay._nodeIds = nodeIds || [];
             hydrateVariableNodes(variable.id, (nodes) => {
               overlay._nodes = nodes || [];
-              if (overlay.classList.contains("open")) {
-                overlay._render();
-              }
+              if (overlay.classList.contains("open")) overlay._render();
             });
           });
         } else if (!overlay._nodes) {
+          // IDs known but details not resolved yet — hydrate now.
           hydrateVariableNodes(variable.id, (nodes) => {
             overlay._nodes = nodes || [];
-            if (overlay.classList.contains("open")) {
-              overlay._render();
-            }
+            if (overlay.classList.contains("open")) overlay._render();
           });
         }
+        // Happy path: both _nodeIds and _nodes already populated from the
+        // card-expand pre-fetch, so overlay._render() above already rendered them.
       }
 
       function buildVarCard(
@@ -4919,6 +5301,23 @@
         function ensureCardBodyInitialized() {
           if (!cardBody || cardBody.dataset.initialized === "true") return;
           cardBody.dataset.initialized = "true";
+
+          // Kick off a lazy fetch of node IDs and details now that the card is
+          // expanded.  This runs in the background so that by the time the user
+          // clicks the "Instances" button the data is already cached — the
+          // usages modal therefore opens instantly.
+          if (!state.nodeIdsByVariable[variable.id]) {
+            requestVariableNodes(variable.id, (nodeIds) => {
+              if (nodeIds && nodeIds.length > 0) {
+                hydrateVariableNodes(variable.id, () => {
+                  // Data cached; nothing else to do until the modal is opened.
+                });
+              }
+            });
+          } else if (!state.nodesByVariable[variable.id]) {
+            hydrateVariableNodes(variable.id, () => {});
+          }
+
           cardBody.innerHTML = `
       <div class="var-meta">${escHtml(variable.id)}</div>
       <div>
@@ -5050,9 +5449,22 @@
           .querySelector(".var-card-header")
           .addEventListener("click", (e) => {
             if (e.target.closest(".layer-actions button")) return;
-            const isExpanded = card.classList.toggle("expanded");
-            if (isExpanded) ensureCardBodyInitialized();
+            const isExpanded = !card.classList.contains("expanded");
+            card.classList.toggle("expanded", isExpanded);
+            if (isExpanded) {
+              state.expandedVariableIds[variable.id] = true;
+              ensureCardBodyInitialized();
+            } else {
+              delete state.expandedVariableIds[variable.id];
+            }
+            invalidateVirtualLayout();
+            scheduleVirtualRender(true);
           });
+
+        if (state.expandedVariableIds[variable.id]) {
+          card.classList.add("expanded");
+          ensureCardBodyInitialized();
+        }
 
         return card;
       }
@@ -5075,9 +5487,14 @@
         row,
         mapDot,
       ) {
+        const requiredScopes = getRequiredScopesForNodeVariable(
+          nodeId,
+          variable.id,
+        );
         const filtered = getMatchingVariablesForType(
           collectionKey,
           variable.resolvedType,
+          requiredScopes,
         );
 
         container.style.display = "block";
@@ -5087,7 +5504,7 @@
         label.className = "section-title";
         label.style.marginBottom = "4px";
         label.textContent =
-          "Target Variable (" + filtered.length + " matching)";
+          "Target Variable (" + filtered.length + " compatible)";
         container.appendChild(label);
 
         const nodeMappingKey = nodeId + "|" + variable.id;
@@ -5132,13 +5549,15 @@
       }
 
       function renderSubSelect(variable, collectionKey, container) {
+        const requiredScopes = getRequiredScopesForVariable(variable);
         const filtered = getMatchingVariablesForType(
           collectionKey,
           variable.resolvedType,
+          requiredScopes,
         );
 
         container.style.display = "block";
-        container.innerHTML = `<div class="section-title" style="margin-bottom:5px">Target Variable (${filtered.length} matching)</div>`;
+        container.innerHTML = `<div class="section-title" style="margin-bottom:5px">Target Variable (${filtered.length} compatible)</div>`;
 
         const currentKey = state.mappings[variable.id]
           ? state.mappings[variable.id].variableKey
@@ -5187,21 +5606,79 @@
         container.appendChild(picker);
       }
 
-      function getMatchingVariablesForType(collectionKey, resolvedType) {
+      function getRequiredScopesForVariable(variable) {
+        return Array.isArray(variable && variable.requiredScopes)
+          ? variable.requiredScopes
+          : [];
+      }
+
+      function getRequiredScopesForNodeVariable(nodeId, variableId) {
+        const specific = state.nodeScopeRequirements[nodeId + "|" + variableId];
+        if (Array.isArray(specific) && specific.length > 0) {
+          return specific;
+        }
+        const fallback = state.variableById[variableId];
+        return getRequiredScopesForVariable(fallback);
+      }
+
+      function getScopeFilterCacheKey(requiredScopes) {
+        return Array.isArray(requiredScopes) && requiredScopes.length > 0
+          ? requiredScopes.slice().sort().join("|")
+          : "__all__";
+      }
+
+      function variableScopeMatchesRequirement(scopes, requiredScope) {
+        if (!requiredScope) return true;
+        if (scopes.includes("ALL_SCOPES")) return true;
+        if (
+          (requiredScope === "FRAME_FILL" ||
+            requiredScope === "SHAPE_FILL" ||
+            requiredScope === "TEXT_FILL") &&
+          scopes.includes("ALL_FILLS")
+        ) {
+          return true;
+        }
+        return scopes.includes(requiredScope);
+      }
+
+      function isVariableScopeCompatible(variable, requiredScopes) {
+        if (!Array.isArray(requiredScopes) || requiredScopes.length === 0) {
+          return true;
+        }
+        if (!Array.isArray(variable && variable.scopes)) {
+          return false;
+        }
+        if (variable.scopes.length === 0) {
+          return true;
+        }
+        return requiredScopes.every((requiredScope) =>
+          variableScopeMatchesRequirement(variable.scopes, requiredScope),
+        );
+      }
+
+      function getMatchingVariablesForType(
+        collectionKey,
+        resolvedType,
+        requiredScopes = [],
+      ) {
         const typeKey = resolvedType || "UNKNOWN";
         if (!state.libraryVariableTypeCache[collectionKey]) {
           state.libraryVariableTypeCache[collectionKey] = {};
         }
         const cache = state.libraryVariableTypeCache[collectionKey];
-        if (cache[typeKey]) return cache[typeKey];
+        const cacheKey = typeKey + "|" + getScopeFilterCacheKey(requiredScopes);
+        if (cache[cacheKey]) return cache[cacheKey];
 
         const vars = state.libraryVariableCache[collectionKey] || [];
-        const filtered =
+        const filteredByType =
           typeKey === "UNKNOWN"
             ? vars
             : vars.filter((v) => v.resolvedType === typeKey);
+        const filtered = filteredByType.filter((v) =>
+          isVariableScopeCompatible(v, requiredScopes),
+        );
 
-        cache[typeKey] = filtered;
+        cache[cacheKey] = filtered;
         return filtered;
       }
 
@@ -5518,34 +5995,21 @@
       }
 
       function updateSummary() {
-        const totalCount = state.variables.length;
-        const mappingSummary = getMappingSummary();
-        const mappedCount = mappingSummary.mappedVariableCount;
-        const nodeMappedCount = mappingSummary.nodeMappedCount;
-        const brokenCount = state.brokenVariableCount || 0;
-        const hiddenLayerTotal = state.stats ? state.stats.hiddenLayerCount : 0;
-        const summaryEl = mainEl.querySelector(".summary-row");
-        if (summaryEl) {
-          summaryEl.className =
-            "summary-row" +
-            (state.lastRebindResult ? " summary-row-secondary" : "");
-          summaryEl.innerHTML = `
-      <span class="stat-chip chip-total">${LINK_ICON} ${totalCount} variable${totalCount !== 1 ? "s" : ""} found</span>
-      ${state.scanInProgress ? `<span class="stat-chip chip-live"><span class="spinner spinner-compact"></span> Scanning…</span>` : ""}
-      ${mappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${mappedCount} variable${mappedCount !== 1 ? "s" : ""} ready</span>` : ""}
-      ${nodeMappedCount > 0 ? `<span class="stat-chip chip-mapped">${REMAP_ICON} ${nodeMappedCount} layer override${nodeMappedCount !== 1 ? "s" : ""}</span>` : ""}
-      ${hiddenLayerTotal > 0 ? `<span class="stat-chip chip-hidden" title="Hidden layers are included">${EYE_OFF_ICON} ${hiddenLayerTotal} hidden</span>` : ""}
-      ${brokenCount > 0 ? `<span class="stat-chip chip-broken">${brokenCount} broken</span>` : ""}
-    `;
+        const renderContext = state.renderContext;
+        const summaryRegion =
+          renderContext && renderContext.regions
+            ? renderContext.regions.summary
+            : null;
+        if (!summaryRegion) return;
+        let summaryEl = summaryRegion.querySelector(".summary-row");
+        if (!summaryEl) {
+          summaryEl = document.createElement("div");
+          summaryRegion.replaceChildren(summaryEl);
         }
-        const liveNoteEl = mainEl.querySelector(".scan-live-note");
-        if (liveNoteEl) {
-          const scanStatus = state.scanStatus || {};
-          const liveTotalNodes = scanStatus.totalNodes || 0;
-          const liveResolved = scanStatus.resolvedVariableCount || totalCount;
-          const liveDiscovered = scanStatus.discoveredCount || totalCount;
-          liveNoteEl.innerHTML = `<span class="spinner spinner-compact"></span><span><strong>Scanning…</strong> ${totalCount} variable${totalCount !== 1 ? "s are" : " is"} ready so far${liveTotalNodes > 0 ? ` across ${liveTotalNodes} node${liveTotalNodes !== 1 ? "s" : ""}` : ""}. ${liveResolved > 0 ? `${liveResolved} of ${liveDiscovered} variable reference${liveDiscovered !== 1 ? "s" : ""} resolved.` : "Results will appear here as they are discovered."} You can start mapping now; apply unlocks when the scan finishes.</span>`;
-        }
+        summaryEl.className =
+          "summary-row" +
+          (state.lastRebindResult ? " summary-row-secondary" : "");
+        summaryEl.innerHTML = getSummaryMarkup();
       }
 
       function updateRebindBtn() {
@@ -5557,18 +6021,6 @@
         rebindBtn.disabled =
           mappingSummary.mappedVariableCount === 0 &&
           mappingSummary.nodeMappedCount === 0;
-      }
-
-      function summarizeWarnings(errors) {
-        const counts = new Map();
-        (errors || []).forEach((error) => {
-          counts.set(error, (counts.get(error) || 0) + 1);
-        });
-        return Array.from(counts.entries())
-          .map(([message, count]) => ({ message, count }))
-          .sort(
-            (a, b) => b.count - a.count || a.message.localeCompare(b.message),
-          );
       }
 
       function renderApplyResult(msg) {
@@ -5732,6 +6184,10 @@
           div.className = `banner banner-${type}`;
           div.innerHTML = icon + " <span>" + escHtml(text) + "</span>";
           mainEl.insertBefore(div, mainEl.firstChild);
+          return;
+        }
+        if (state.currentMainMode === "list" && state.renderContext) {
+          updateScanApplyRegion();
           return;
         }
         renderMain();
