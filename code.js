@@ -1856,8 +1856,6 @@ async function handleScan({ scope }) {
       scannedNodes: allNodes.length,
       totalNodes: allNodes.length,
     });
-    setRelaunchForRoots(scope, roots);
-
     flushPendingScanChunk(allNodes.length, true);
 
     figma.ui.postMessage({
