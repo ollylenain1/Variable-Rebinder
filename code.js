@@ -1,14 +1,14 @@
-// Blueprint: Variable Mapper — code.js  v3.0
+// Blueprint: Variable Mapper — code.js v3.0
 // ─────────────────────────────────────────────────────────────────────────────
 // Key improvements over v2.x:
-//   • Chunked node walking with inter-chunk yields — no timeouts on huge files
-//   • Visibility-aware traversal pruning for hidden/no-variable branches
-//   • Concurrent loadAsync() with capped concurrency (avoids memory spikes)
-//   • Progress messages sent to UI during long scans
-//   • Broken/unresolved variables surfaced as a dedicated category
-//   • Bulk remap by source library collection supported
-//   • Node-override spreading fixed (includes representative node itself)
-//   • Better variable key/name lookup with multi-tier fallback
+// • Chunked node walking with inter-chunk yields — no timeouts on huge files
+// • Visibility-aware traversal pruning for hidden/no-variable branches
+// • Concurrent loadAsync() with capped concurrency (avoids memory spikes)
+// • Progress messages sent to UI during long scans
+// • Broken/unresolved variables surfaced as a dedicated category
+// • Bulk remap by source library collection supported
+// • Node-override spreading fixed (includes representative node itself)
+// • Better variable key/name lookup with multi-tier fallback
 
 figma.showUI(__html__, {
   width: 500,
@@ -17,7 +17,6 @@ figma.showUI(__html__, {
 });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
 const CHUNK_SIZE = 400; // nodes processed per tick before yielding
 const LOAD_CONCURRENCY = 20; // max parallel loadAsync() calls
 const PROGRESS_INTERVAL = 900; // ms between UI update messages
@@ -29,7 +28,9 @@ const UNSETTABLE_FIELDS = new Set(["textRangeFills", "textRangeStrokes"]);
 
 // Paint array fields — must use setBoundVariableForPaint + node[field] assignment
 const PAINT_FIELDS = new Set(["fills", "strokes"]);
+
 const variableCache = new Map(); // key: variableId -> value: variable
+
 const FRAME_FILL_NODE_TYPES = new Set([
   "FRAME",
   "COMPONENT",
@@ -41,6 +42,7 @@ const FRAME_FILL_NODE_TYPES = new Set([
   "SLIDE_ROW",
   "TABLE",
 ]);
+
 const FIELD_SCOPE_MAP = {
   characters: ["TEXT_CONTENT"],
   width: ["WIDTH_HEIGHT"],
@@ -81,18 +83,21 @@ const FIELD_SCOPE_MAP = {
 
 function sanitizeUIPreferences(raw) {
   const prefs = raw && typeof raw === "object" ? raw : {};
+
   const validScope =
     prefs.scope === "selection" ||
     prefs.scope === "page" ||
     prefs.scope === "file"
       ? prefs.scope
       : "selection";
+
   const validThemeMode =
     prefs.themeMode === "auto" ||
     prefs.themeMode === "light" ||
     prefs.themeMode === "dark"
       ? prefs.themeMode
       : "auto";
+
   const recentCollectionKeys = Array.isArray(prefs.recentCollectionKeys)
     ? prefs.recentCollectionKeys.length > 8
       ? prefs.recentCollectionKeys
@@ -159,11 +164,9 @@ function getCanonicalVariableId(id, idRemap) {
 
 async function getCachedVariable(id) {
   if (!id) return null;
-
   if (variableCache.has(id)) {
     return variableCache.get(id);
   }
-
   try {
     const variable = await figma.variables.getVariableByIdAsync(id);
     if (variable) {
@@ -194,10 +197,10 @@ function isNodeSelfHiddenForTraversal(node) {
  * it down — we filter during traversal instead.
  *
  * Returns:
- *   scanNodes   – nodes to process (has boundVariables OR is TEXT)
- *   needLoad    – subset that also need loadAsync() before reading properties
- *   totalTraversed – total nodes visited (for reduction reporting)
- *   lightScanMode – true when traversal exceeded the safeguard threshold
+ *   scanNodes      – nodes to process (has boundVariables OR is TEXT)
+ *   needLoad        – subset that also need loadAsync() before reading properties
+ *   totalTraversed  – total nodes visited (for reduction reporting)
+ *   lightScanMode   – true when traversal exceeded the safeguard threshold
  */
 function collectNodesForScan(roots) {
   const scanNodes = [];
@@ -209,16 +212,20 @@ function collectNodesForScan(roots) {
     if (scanCancelled) {
       return { scanNodes, needLoad, totalTraversed, lightScanMode };
     }
+
     const stack = [
       { node: root, hasInstanceAncestor: false, hasHiddenAncestor: false },
     ];
+
     while (stack.length > 0) {
       if (scanCancelled) {
         return { scanNodes, needLoad, totalTraversed, lightScanMode };
       }
+
       const current = stack.pop();
       const node = current.node;
       totalTraversed += 1;
+
       if (!lightScanMode && totalTraversed > LIGHT_SCAN_NODE_THRESHOLD) {
         lightScanMode = true;
       }
@@ -236,6 +243,7 @@ function collectNodesForScan(roots) {
       // Only collect nodes that can carry variable bindings.
       if (hasVars || isText) {
         scanNodes.push(node);
+
         // loadAsync() is needed for TEXT nodes with variables, and for any
         // node with variables that lives inside an INSTANCE ancestor (overrides).
         if ((isText && hasVars) || (hasVars && current.hasInstanceAncestor)) {
@@ -246,6 +254,7 @@ function collectNodesForScan(roots) {
       if ("children" in node) {
         const childHasInstanceAncestor =
           current.hasInstanceAncestor || node.type === "INSTANCE";
+
         for (let i = node.children.length - 1; i >= 0; i--) {
           if (scanCancelled) {
             return { scanNodes, needLoad, totalTraversed, lightScanMode };
@@ -275,6 +284,7 @@ function collectNodesForRebind(roots, includeHidden) {
 
   roots.forEach((root) => {
     const stack = [{ node: root, hasHiddenAncestor: false }];
+
     while (stack.length > 0) {
       const current = stack.pop();
       const node = current.node;
@@ -334,6 +344,7 @@ async function pMap(items, fn, concurrency) {
   for (let w = 0; w < workerCount; w++) {
     workers.push(worker());
   }
+
   await Promise.all(workers);
   return results;
 }
@@ -343,6 +354,7 @@ function getBoundVariableIdLookup(node) {
   const ids = Object.create(null);
   const bv = node.boundVariables;
   if (!bv) return ids;
+
   for (const field of Object.keys(bv)) {
     const val = bv[field];
     if (!val) continue;
@@ -354,6 +366,7 @@ function getBoundVariableIdLookup(node) {
       ids[val.id] = true;
     }
   }
+
   return ids;
 }
 
@@ -428,6 +441,7 @@ function getSegmentBoundVariableIds(node, textFillSegments) {
       if (scanCancelled) return [];
       const paints = seg["fills"];
       if (!Array.isArray(paints)) continue;
+
       for (const paint of paints) {
         if (scanCancelled) return [];
         const alias =
@@ -444,6 +458,7 @@ function getSegmentBoundVariableIds(node, textFillSegments) {
   } catch (err) {
     debugWarn("getSegmentBoundVariableIds failed:", err);
   }
+
   return Object.keys(ids);
 }
 
@@ -451,10 +466,10 @@ function getSegmentBoundVariableIds(node, textFillSegments) {
  * Build the full list of {field, index, id, segmentRange} entries for rebinding.
  *
  * TEXT nodes can have two distinct layers of paint variable bindings:
- *   1. Node-level: node.boundVariables.fills — applies to the whole text node
- *      (e.g. body text color bound to "Neutral 900")
- *   2. Segment-level: per-character-range overrides from getStyledTextSegments
- *      (e.g. a linked word bound to "Interactive Blue")
+ * 1. Node-level: node.boundVariables.fills — applies to the whole text node
+ *    (e.g. body text color bound to "Neutral 900")
+ * 2. Segment-level: per-character-range overrides from getStyledTextSegments
+ *    (e.g. a linked word bound to "Interactive Blue")
  *
  * These are INDEPENDENT — a single text layer can have BOTH simultaneously.
  * For example:
@@ -471,14 +486,16 @@ function getSegmentBoundVariableIds(node, textFillSegments) {
 function getBoundVariableEntries(node, textFillSegments) {
   const entries = [];
   if (scanCancelled) return entries;
-  const bv = node.boundVariables;
 
+  const bv = node.boundVariables;
   if (bv) {
     for (const field of Object.keys(bv)) {
       if (scanCancelled) return entries;
       if (UNSETTABLE_FIELDS.has(field)) continue;
+
       const val = bv[field];
       if (!val) continue;
+
       if (Array.isArray(val)) {
         for (let i = 0; i < val.length; i++) {
           if (scanCancelled) return entries;
@@ -503,7 +520,6 @@ function getBoundVariableEntries(node, textFillSegments) {
       // getStyledTextSegments only supports 'fills' for paint, not 'strokes'.
       // Strokes on TEXT nodes are node-level only and already captured above.
       const segs = textFillSegments || [];
-
       const segEntries = [];
       const segOnlyIdsByField = Object.create(null);
       const nodeLevelIdsByField = Object.create(null);
@@ -512,16 +528,19 @@ function getBoundVariableEntries(node, textFillSegments) {
         if (scanCancelled) return entries;
         const field = e.field;
         const index = e.index !== null && e.index !== undefined ? e.index : 0;
+
         let fieldLookup = nodeLevelIdsByField[field];
         if (!fieldLookup) {
           fieldLookup = Object.create(null);
           nodeLevelIdsByField[field] = fieldLookup;
         }
+
         let indexLookup = fieldLookup[index];
         if (!indexLookup) {
           indexLookup = Object.create(null);
           fieldLookup[index] = indexLookup;
         }
+
         indexLookup[e.id] = true;
       }
 
@@ -529,12 +548,14 @@ function getBoundVariableEntries(node, textFillSegments) {
         if (scanCancelled) return entries;
         const paints = seg["fills"];
         if (!Array.isArray(paints)) continue;
+
         for (let i = 0; i < paints.length; i++) {
           if (scanCancelled) return entries;
           const alias =
             paints[i] &&
             paints[i].boundVariables &&
             paints[i].boundVariables.color;
+
           if (alias && alias.type === "VARIABLE_ALIAS") {
             segEntries.push({
               field: "fills",
@@ -542,19 +563,23 @@ function getBoundVariableEntries(node, textFillSegments) {
               id: alias.id,
               segmentRange: { start: seg.start, end: seg.end },
             });
+
             const fieldLookup = nodeLevelIdsByField.fills;
             const nodeIds = fieldLookup && fieldLookup[i];
+
             if (nodeIds && nodeIds[alias.id]) {
               let segFieldLookup = segOnlyIdsByField.fills;
               if (!segFieldLookup) {
                 segFieldLookup = Object.create(null);
                 segOnlyIdsByField.fills = segFieldLookup;
               }
+
               let segIndexLookup = segFieldLookup[i];
               if (!segIndexLookup) {
                 segIndexLookup = Object.create(null);
                 segFieldLookup[i] = segIndexLookup;
               }
+
               segIndexLookup[alias.id] = true;
             }
           }
@@ -567,9 +592,11 @@ function getBoundVariableEntries(node, textFillSegments) {
         if (scanCancelled) return entries;
         const e = entries[i];
         if (e.segmentRange !== null) continue;
+
         const fieldLookup = segOnlyIdsByField[e.field];
         const index = e.index !== null && e.index !== undefined ? e.index : 0;
         const indexLookup = fieldLookup && fieldLookup[index];
+
         if (indexLookup && indexLookup[e.id]) {
           entries.splice(i, 1);
         }
@@ -607,7 +634,6 @@ function didVariableApply(node, field, expectedId) {
   if (!bv || !bv[field] || bv[field] === figma.mixed) return false;
 
   const val = bv[field];
-
   if (Array.isArray(val)) {
     return val.some(
       (item) =>
@@ -667,6 +693,7 @@ function getFillVariableScope(node) {
 function getEffectVariableScopes(node, entry) {
   const index = entry && typeof entry.index === "number" ? entry.index : null;
   if (!node || !Array.isArray(node.effects) || index === null) return [];
+
   const effect = node.effects[index];
   if (!effect || !effect.boundVariables) return [];
 
@@ -677,6 +704,7 @@ function getEffectVariableScopes(node, entry) {
     }
     scopes.push(field === "color" ? "EFFECT_COLOR" : "EFFECT_FLOAT");
   }
+
   return scopes;
 }
 
@@ -718,8 +746,10 @@ function isEffectivelyHidden(node) {
 
 /** Cached selection IDs from scan time (selection is lost when UI gains focus). */
 let cachedSelectionIds = [];
+
 /** Last scanned per-variable node usage, kept in controller memory for lazy UI fetches. */
 let lastScanNodeIdsByVariable = {};
+
 /**
  * Maps each scanned instance-child node ID → true, for every node that
  * (a) lives inside a INSTANCE ancestor and (b) has at least one bound variable.
@@ -728,6 +758,7 @@ let lastScanNodeIdsByVariable = {};
  * scope doesn't include the instance root itself.
  */
 let lastScanInstanceChildNodeIds = {};
+
 /** Last scanned lookup maps, reused by rebind to avoid resending large payloads from the UI. */
 let lastScanLookupMaps = null;
 
@@ -787,6 +818,7 @@ function annotateDuplicateFlags(variables) {
 
   for (const variable of variables || []) {
     if (!variable) continue;
+
     variable.isCrossCollectionDuplicate = false;
     variable.isCrossLibraryDuplicate = false;
     variable.isTypeConflict = false;
@@ -817,10 +849,12 @@ function annotateDuplicateFlags(variables) {
     const libraryKeys = new Set(
       group.map((variable) => getVariableLibraryIdentity(variable)),
     );
+
     const isCrossCollectionDuplicate = collectionKeys.size > 1;
     const isCrossLibraryDuplicate = libraryKeys.size > 1;
 
     if (!isCrossCollectionDuplicate && !isCrossLibraryDuplicate) continue;
+
     for (const variable of group) {
       variable.isCrossCollectionDuplicate = isCrossCollectionDuplicate;
       variable.isCrossLibraryDuplicate = isCrossLibraryDuplicate;
@@ -829,10 +863,13 @@ function annotateDuplicateFlags(variables) {
 
   for (const group of byNormalizedName.values()) {
     if (!group || group.length < 2) continue;
+
     const typeKeys = new Set(
       group.map((variable) => String(variable.resolvedType || "UNKNOWN")),
     );
+
     if (typeKeys.size < 2) continue;
+
     for (const variable of group) {
       variable.isTypeConflict = true;
     }
@@ -865,9 +902,11 @@ function encodeArrayLookupEntries(lookup) {
 
 function mergeScopeRequirement(scopeLookup, key, scopes) {
   if (!key || !Array.isArray(scopes) || scopes.length === 0) return;
+
   if (!scopeLookup[key]) {
     scopeLookup[key] = new Set();
   }
+
   for (const scope of scopes) {
     if (scope) {
       scopeLookup[key].add(scope);
@@ -877,16 +916,21 @@ function mergeScopeRequirement(scopeLookup, key, scopes) {
 
 function finalizeScopeRequirements(scopeLookup, idRemap, keyMapper) {
   const finalized = {};
+
   for (const [rawKey, scopeSet] of Object.entries(scopeLookup || {})) {
     if (!scopeSet || scopeSet.size === 0) continue;
+
     const normalizedKey =
       typeof keyMapper === "function"
         ? keyMapper(rawKey, idRemap)
         : getCanonicalVariableId(rawKey, idRemap);
+
     if (!normalizedKey) continue;
+
     if (!finalized[normalizedKey]) {
       finalized[normalizedKey] = new Set();
     }
+
     for (const scope of scopeSet) {
       if (scope) {
         finalized[normalizedKey].add(scope);
@@ -908,6 +952,7 @@ async function resolveNodeDetails(nodeIds) {
 
   const resolveNodes = async (requestedIds) => {
     const foundById = new Map();
+
     await pMap(
       requestedIds,
       async (id) => {
@@ -927,13 +972,16 @@ async function resolveNodeDetails(nodeIds) {
       },
       LOAD_CONCURRENCY,
     );
+
     return foundById;
   };
 
   const foundById = await resolveNodes(ids);
+
   if (foundById.size < ids.length) {
     await figma.loadAllPagesAsync();
     const missingIds = ids.filter((id) => !foundById.has(id));
+
     if (missingIds.length > 0) {
       const retriedById = await resolveNodes(missingIds);
       for (const [id, detail] of retriedById.entries()) {
@@ -951,6 +999,7 @@ async function getRoots(scope, selectionIds) {
       selectionIds && selectionIds.length > 0
         ? selectionIds
         : figma.currentPage.selection.map((n) => n.id);
+
     if (ids.length === 0) return null;
 
     const nodes = [];
@@ -962,6 +1011,7 @@ async function getRoots(scope, selectionIds) {
         debugWarn("getRoots could not resolve selected node:", err);
       }
     }
+
     return nodes.length > 0 ? nodes : null;
   }
 
@@ -977,6 +1027,7 @@ async function getRoots(scope, selectionIds) {
 
 function setRelaunchForRoots(scope, roots) {
   if (!Array.isArray(roots) || roots.length === 0) return;
+
   const description =
     scope === "selection"
       ? "Re-open Variable Mapper for this selection"
@@ -994,7 +1045,7 @@ function setRelaunchForRoots(scope, roots) {
   }
 }
 
-// ─── Scan ─────────────────────────────────────────────────────────────────────
+// ─── Scan ───────────────────────────────────────────────────────────────────────
 
 async function handleScan({ scope }) {
   try {
@@ -1037,7 +1088,7 @@ async function handleScan({ scope }) {
       return;
     }
 
-    // ── Step 1: Collect all nodes ────────────────────────────────────────────
+    // ── Step 1: Collect all nodes ───────────────────────────────────────────
     figma.ui.postMessage({
       type: "scan-progress",
       message: "Walking node tree…",
@@ -1055,6 +1106,7 @@ async function handleScan({ scope }) {
     }
 
     const scanResult = collectNodesForScan(roots);
+
     if (scanCancelled) {
       figma.ui.postMessage({
         type: "scan-result",
@@ -1062,6 +1114,7 @@ async function handleScan({ scope }) {
       });
       return;
     }
+
     // scanNodes contains only nodes with boundVariables or TEXT — pre-filtered
     // during traversal. totalTraversed is the full count for reduction reporting.
     const lightScanMode = !!scanResult.lightScanMode;
@@ -1072,6 +1125,7 @@ async function handleScan({ scope }) {
       ? scanResult.needLoad.filter((node) => nodeHasBoundVariables(node))
       : scanResult.needLoad;
     const totalTraversed = scanResult.totalTraversed;
+
     console.log(
       "[Variable Mapper] Traversed " +
         totalTraversed +
@@ -1246,21 +1300,25 @@ async function handleScan({ scope }) {
     const segmentBoundIdsByNode = {};
     const textSegmentCache = new Map(); // node.id -> getStyledTextSegments(["fills"])
     const localCollectionCache = {};
+
     const finalVariableInfo = [];
     const seenCanonical = new Set();
     const canonicalByNameCollection = {};
     const resolvedVariableIds = new Set();
     const idRemap = {};
+
     const STREAM_VARIABLE_BATCH_SIZE = 120;
     const STREAM_VARIABLE_POST_THRESHOLD = 180;
     const STREAM_UI_FLUSH_INTERVAL = Math.max(PROGRESS_INTERVAL, 1200);
     const STREAM_PROGRESS_INTERVAL = STREAM_UI_FLUSH_INTERVAL + 300;
+
     let streamedVariableCount = 0;
     let resolvedVariableCount = 0;
     let lastProgressAt = Date.now();
     let lastChunkPostAt = Date.now();
     let pendingStreamedVariables = [];
     let pendingStreamedSummary = {};
+
     const flushPendingScanChunk = (scannedNodes, force = false) => {
       if (
         pendingStreamedVariables.length === 0 ||
@@ -1282,11 +1340,13 @@ async function handleScan({ scope }) {
           resolvedVariableCount,
         },
       });
+
       pendingStreamedVariables = [];
       pendingStreamedSummary = {};
       lastChunkPostAt = Date.now();
       return true;
     };
+
     const canonicalVariableKey = (variableInfo) =>
       [
         normalizeDuplicateName(variableInfo.name),
@@ -1313,8 +1373,8 @@ async function handleScan({ scope }) {
 
       const localCollection =
         localCollectionCache[variable.variableCollectionId];
-      let collectionName, libraryName;
 
+      let collectionName, libraryName;
       if (localCollection) {
         collectionName = localCollection.name;
         libraryName = "This file";
@@ -1347,12 +1407,15 @@ async function handleScan({ scope }) {
       const entries = Array.from(
         (nodesByVariableMap[variableId] || new Map()).values(),
       );
+
       let hasInstances = false;
       let hiddenCount = 0;
+
       for (const entry of entries) {
         if (entry.h) hiddenCount += 1;
         if (entry.t === "INSTANCE") hasInstances = true;
       }
+
       return {
         c: entries.length,
         h: hiddenCount,
@@ -1364,11 +1427,14 @@ async function handleScan({ scope }) {
       const queuedIds = Array.from(ids || []).filter(
         (id) => id && !resolvedVariableIds.has(id),
       );
+
       if (queuedIds.length === 0) return;
 
       for (let i = 0; i < queuedIds.length; i += STREAM_VARIABLE_BATCH_SIZE) {
         if (scanCancelled) return;
+
         const batchIds = queuedIds.slice(i, i + STREAM_VARIABLE_BATCH_SIZE);
+
         const rawVariables = await pMap(
           batchIds,
           async (queriedId) => {
@@ -1401,8 +1467,10 @@ async function handleScan({ scope }) {
 
         const streamedVariables = [];
         const streamedSummary = {};
+
         for (const rawVariable of rawVariables) {
           if (scanCancelled) return;
+
           const variableInfo = buildVariableInfo(rawVariable);
           if (!variableInfo) continue;
 
@@ -1412,6 +1480,7 @@ async function handleScan({ scope }) {
               rawRequiredScopesByVariableId[rawVariable._queriedId] || [],
             ),
           ]);
+
           if (rawRequiredScopes.size > 0) {
             variableInfo.requiredScopes = Array.from(rawRequiredScopes).sort();
           }
@@ -1429,18 +1498,22 @@ async function handleScan({ scope }) {
 
           const key = canonicalVariableKey(variableInfo);
           const canonical = canonicalByNameCollection[key];
+
           if (canonical && canonical.id !== variableInfo.id) {
             idRemap[variableInfo.id] = canonical.id;
+
             if (
               variableInfo._queriedId &&
               variableInfo._queriedId !== variableInfo.id
             ) {
               idRemap[variableInfo._queriedId] = canonical.id;
             }
+
             if (nodesByVariableMap[variableInfo.id]) {
               if (!nodesByVariableMap[canonical.id]) {
                 nodesByVariableMap[canonical.id] = new Map();
               }
+
               for (const [dedupKey, entry] of nodesByVariableMap[
                 variableInfo.id
               ]) {
@@ -1449,14 +1522,17 @@ async function handleScan({ scope }) {
                   nodesByVariableMap[canonical.id].set(dedupKey, entry);
                 }
               }
+
               delete nodesByVariableMap[variableInfo.id];
             }
+
             continue;
           }
 
           if (!canonical) {
             canonicalByNameCollection[key] = variableInfo;
           }
+
           if (!seenCanonical.has(key)) {
             seenCanonical.add(key);
             finalVariableInfo.push(variableInfo);
@@ -1502,26 +1578,32 @@ async function handleScan({ scope }) {
           });
           return;
         }
+
         // Note: all nodes in allNodes already have boundVariables or are TEXT —
         // the guard that was here has been moved into collectNodesForScan.
-
         const hasMixedFills = !lightScanMode && hasTextRangeFillBindings(node);
         const textFillSegments =
           node.type === "TEXT" && hasMixedFills
             ? getCachedTextFillSegments(node, textSegmentCache)
             : null;
+
         const boundEntries = getBoundVariableEntries(node, textFillSegments);
+
         const nodeLevelIds = getBoundVariableIds(node);
         for (const id of nodeLevelIds) {
           if (!variableIdSet.has(id)) pendingNodeLevelIds.add(id);
         }
+
         const ids = Object.create(null);
         for (const id of nodeLevelIds) ids[id] = true;
+
         const segmentIds = lightScanMode
           ? []
           : getSegmentBoundVariableIds(node, textFillSegments);
+
         if (segmentIds.length > 0) segmentBoundIdsByNode[node.id] = segmentIds;
         for (const id of segmentIds) ids[id] = true;
+
         const inst = getNearestInstance(node);
         const hidden = isEffectivelyHidden(node);
         const pageName = getPageName(inst || node);
@@ -1530,8 +1612,10 @@ async function handleScan({ scope }) {
         for (const entry of boundEntries) {
           if (scanCancelled) return;
           if (!entry || !entry.id) continue;
+
           const requiredScopes = getRequiredScopesForEntry(node, entry);
           if (requiredScopes.length === 0) continue;
+
           mergeScopeRequirement(
             rawRequiredScopesByVariableId,
             entry.id,
@@ -1552,7 +1636,9 @@ async function handleScan({ scope }) {
             });
             return;
           }
+
           variableIdSet.add(id);
+
           if (!nodesByVariableMap[id]) nodesByVariableMap[id] = new Map();
 
           if (inst) {
@@ -1569,6 +1655,7 @@ async function handleScan({ scope }) {
                 h: hidden,
               });
             }
+
             // Track the actual child node ID separately (not sent to UI).
             // rebind uses this to load instance children into nodeById even
             // when the rebind scope doesn't include the instance root.
@@ -1589,6 +1676,7 @@ async function handleScan({ scope }) {
 
       const scannedNodes = Math.min(i + CHUNK_SIZE, allNodes.length);
       const now = Date.now();
+
       if (pendingNodeLevelIds.size > 0) {
         await resolveVariableIds(pendingNodeLevelIds, scannedNodes);
         if (scanCancelled) {
@@ -1600,9 +1688,12 @@ async function handleScan({ scope }) {
         }
         pendingNodeLevelIds.clear();
       }
+
       if (now - lastProgressAt > STREAM_PROGRESS_INTERVAL) {
         const pct = 20 + Math.round((scannedNodes / allNodes.length) * 40);
+
         const postedChunk = flushPendingScanChunk(scannedNodes);
+
         if (!postedChunk) {
           figma.ui.postMessage({
             type: "scan-progress",
@@ -1612,8 +1703,10 @@ async function handleScan({ scope }) {
             totalNodes: allNodes.length,
           });
         }
+
         lastProgressAt = now;
         await yieldTick();
+
         if (scanCancelled) {
           figma.ui.postMessage({
             type: "scan-result",
@@ -1649,6 +1742,7 @@ async function handleScan({ scope }) {
       lastScanNodeIdsByVariable = {};
       lastScanInstanceChildNodeIds = {};
       lastScanLookupMaps = null;
+
       figma.ui.postMessage({
         type: "scan-result",
         variables: [],
@@ -1657,7 +1751,7 @@ async function handleScan({ scope }) {
       return;
     }
 
-    // ── Step 5: Resolve variable IDs → metadata ──────────────────────────────
+    // ── Step 5: Resolve variable IDs → metadata ───────────────────────────────
     figma.ui.postMessage({
       type: "scan-progress",
       message: "Resolving variables…",
@@ -1686,21 +1780,26 @@ async function handleScan({ scope }) {
     const unresolvedIds = Array.from(variableIdSet).filter(
       (id) => !resolvedVariableIds.has(id),
     );
+
     await resolveVariableIds(unresolvedIds, allNodes.length);
 
     figma.ui.postMessage({
       type: "scan-progress",
-      message: `Scanning… ${streamedVariableCount} variable${streamedVariableCount !== 1 ? "s" : ""} found${lightScanMode ? " (light scan mode)" : ""}`,
+      message: `Scanning… ${streamedVariableCount} variable${
+        streamedVariableCount !== 1 ? "s" : ""
+      } found${lightScanMode ? " (light scan mode)" : ""}`,
       pct: 84,
       scannedNodes: allNodes.length,
       totalNodes: allNodes.length,
     });
 
     annotateDuplicateFlags(finalVariableInfo);
+
     const requiredScopesByVariableId = finalizeScopeRequirements(
       rawRequiredScopesByVariableId,
       idRemap,
     );
+
     const requiredScopesByNodeVariableKey = finalizeScopeRequirements(
       rawRequiredScopesByNodeVariableKey,
       idRemap,
@@ -1745,8 +1844,8 @@ async function handleScan({ scope }) {
     const boundIdToName = {};
     const boundIdToCollectionKey = {};
     const variableKeyToCollectionKey = {};
-
     const collectionIdToKey = {};
+
     for (const c of remoteCollections) {
       collectionIdToKey["VariableCollectionId:" + c.key] = c.key;
     }
@@ -1756,12 +1855,15 @@ async function handleScan({ scope }) {
 
     for (const v of finalVariableInfo) {
       if (v.broken) continue;
+
       if (v.id && v.key) boundIdToKey[v.id] = v.key;
       if (v.id && v.name) boundIdToName[v.id] = v.name;
+
       if (v._queriedId && v._queriedId !== v.id) {
         if (v.key) boundIdToKey[v._queriedId] = v.key;
         if (v.name) boundIdToName[v._queriedId] = v.name;
       }
+
       const collKey = v.collectionId ? collectionIdToKey[v.collectionId] : null;
       if (v.id && collKey) boundIdToCollectionKey[v.id] = collKey;
       if (v._queriedId && collKey)
@@ -1790,6 +1892,7 @@ async function handleScan({ scope }) {
         if (!boundIdToName[id]) segmentAliasIds.add(id);
       }
     }
+
     if (segmentAliasIds.size > 0) {
       await pMap(
         Array.from(segmentAliasIds),
@@ -1799,13 +1902,16 @@ async function handleScan({ scope }) {
             // Register under the queried ID (what segments report)
             boundIdToKey[queriedId] = v.key;
             boundIdToName[queriedId] = v.name;
+
             const collKey = v.variableCollectionId
               ? collectionIdToKey[v.variableCollectionId]
               : null;
+
             if (collKey) {
               boundIdToCollectionKey[queriedId] = collKey;
               variableKeyToCollectionKey[v.key] = collKey;
             }
+
             // Also register under the resolved ID (what getVariableByIdAsync returns)
             // in case Figma uses a different ID at rebind time
             if (v.id !== queriedId) {
@@ -1819,24 +1925,28 @@ async function handleScan({ scope }) {
       );
     }
 
-    // ── Step 10: Summary stats ────────────────────────────────────────────────
+    // ── Step 10: Summary stats ─────────────────────────────────────────────────
     const nodeIdsByVariable = {};
     const nodeSummaryByVariable = {};
     let hiddenLayerCount = 0;
+
     for (const [varId, map] of Object.entries(nodesByVariableMap)) {
       const entries = Array.from(map.values());
       nodeIdsByVariable[varId] = entries.map((entry) => entry.id);
+
       let hasInstances = false;
       for (const entry of entries) {
         if (entry.h) hiddenLayerCount += 1;
         if (entry.t === "INSTANCE") hasInstances = true;
       }
+
       nodeSummaryByVariable[varId] = {
         c: entries.length,
         h: entries.filter((entry) => entry.h).length,
         i: hasInstances,
       };
     }
+
     lastScanNodeIdsByVariable = nodeIdsByVariable;
     lastScanInstanceChildNodeIds = instanceChildNodeIds;
     lastScanLookupMaps = {
@@ -1856,6 +1966,7 @@ async function handleScan({ scope }) {
       scannedNodes: allNodes.length,
       totalNodes: allNodes.length,
     });
+
     flushPendingScanChunk(allNodes.length, true);
 
     figma.ui.postMessage({
@@ -1893,7 +2004,7 @@ async function handleScan({ scope }) {
   }
 }
 
-// ─── Get variable usage nodes ─────────────────────────────────────────────────
+// ─── Get variable usage nodes ────────────────────────────────────────────────────
 
 async function handleGetVariableNodes({ variableId }) {
   try {
@@ -1927,7 +2038,7 @@ async function handleGetNodeDetails({ nodeIds }) {
   }
 }
 
-// ─── Get library variables ────────────────────────────────────────────────────
+// ─── Get library variables ───────────────────────────────────────────────────────
 
 async function handleGetLibraryVariables({ collectionKey, isLocal, localId }) {
   try {
@@ -1938,6 +2049,7 @@ async function handleGetLibraryVariables({ collectionKey, isLocal, localId }) {
       const filtered = allLocal.filter(
         (v) => v.variableCollectionId === localId,
       );
+
       variables = filtered.map((v) => ({
         key: v.key,
         name: v.name,
@@ -1951,10 +2063,12 @@ async function handleGetLibraryVariables({ collectionKey, isLocal, localId }) {
         await figma.teamLibrary.getVariablesInLibraryCollectionAsync(
           collectionKey,
         );
+
       variables = await pMap(
         raw,
         async (v) => {
           let scopes = Array.isArray(v.scopes) ? [...v.scopes] : null;
+
           if (!scopes) {
             try {
               const imported = await figma.variables.importVariableByKeyAsync(
@@ -1994,7 +2108,7 @@ async function handleGetLibraryVariables({ collectionKey, isLocal, localId }) {
   }
 }
 
-// ─── Rebind ───────────────────────────────────────────────────────────────────
+// ─── Rebind ─────────────────────────────────────────────────────────────────────
 
 async function handleRebind({
   mappings,
@@ -2010,6 +2124,7 @@ async function handleRebind({
 }) {
   try {
     const lookupMaps = lastScanLookupMaps || {};
+
     boundIdToKey = boundIdToKey || lookupMaps.boundIdToKey || {};
     boundIdToName = boundIdToName || lookupMaps.boundIdToName || {};
     boundIdToCollectionKey =
@@ -2034,12 +2149,14 @@ async function handleRebind({
     const roots = (await getRoots(scope, cachedSelectionIds)) || [];
     const nodesToProcess = collectNodesForRebind(roots, includeHidden);
     const nodeById = {};
+
     for (const node of nodesToProcess) {
       nodeById[node.id] = node;
     }
 
     const ensureSelectedNodesIncluded = async (selectionIds) => {
       if (!Array.isArray(selectionIds) || selectionIds.length === 0) return;
+
       const missingSelectionIds = selectionIds.filter((id) => !nodeById[id]);
       if (missingSelectionIds.length === 0) return;
 
@@ -2049,9 +2166,11 @@ async function handleRebind({
           try {
             const node = await figma.getNodeByIdAsync(id);
             if (!node || nodeById[id]) return;
+
             if (typeof node.loadAsync === "function") {
               await node.loadAsync();
             }
+
             nodeById[id] = node;
             nodesToProcess.push(node);
           } catch (err) {
@@ -2071,9 +2190,13 @@ async function handleRebind({
           "rebind selection scope collected 0 nodes; falling back to explicit selection ID resolution",
         );
       }
+
       await ensureSelectedNodesIncluded(selectionIdsForScope);
+
       debugWarn(
-        `rebind selection scope collected ${nodesToProcess.length} node(s); selected node present=${selectionIdsForScope.some((id) => !!nodeById[id])}`,
+        `rebind selection scope collected ${nodesToProcess.length} node(s); selected node present=${selectionIdsForScope.some(
+          (id) => !!nodeById[id],
+        )}`,
       );
     }
 
@@ -2084,8 +2207,10 @@ async function handleRebind({
     // children (the actual override nodes) must be reachable by
     // applyOverrideToDescendants so variable mappings are applied correctly.
     const instanceChildIds = Object.keys(lastScanInstanceChildNodeIds);
+
     if (instanceChildIds.length > 0) {
       const missingChildIds = instanceChildIds.filter((id) => !nodeById[id]);
+
       if (missingChildIds.length > 0) {
         await pMap(
           missingChildIds,
@@ -2109,7 +2234,9 @@ async function handleRebind({
 
     if (scope === "selection") {
       debugWarn(
-        `rebind selection scope final node count=${nodesToProcess.length}; selected IDs present=${selectionIdsForScope.filter((id) => !!nodeById[id]).length}/${selectionIdsForScope.length}`,
+        `rebind selection scope final node count=${nodesToProcess.length}; selected IDs present=${
+          selectionIdsForScope.filter((id) => !!nodeById[id]).length
+        }/${selectionIdsForScope.length}`,
       );
     }
 
@@ -2135,7 +2262,7 @@ async function handleRebind({
       LOAD_CONCURRENCY,
     );
 
-    // ── Resolve target variables ──────────────────────────────────────────────
+    // ── Resolve target variables ─────────────────────────────────────────────
     figma.ui.postMessage({
       type: "rebind-progress",
       message: "Importing target variables…",
@@ -2152,11 +2279,14 @@ async function handleRebind({
 
     const addVariableError = (variableId, message) => {
       if (!variableId || !message) return;
+
       const canonicalId = getCanonicalVariableId(variableId, idRemap);
       if (!canonicalId) return;
+
       if (!variableErrorsById[canonicalId]) {
         variableErrorsById[canonicalId] = [];
       }
+
       if (!variableErrorsById[canonicalId].includes(message)) {
         variableErrorsById[canonicalId].push(message);
       }
@@ -2164,19 +2294,24 @@ async function handleRebind({
 
     const recordError = (message) => {
       if (!message) return;
+
       const nextCount = (errorCounts.get(message) || 0) + 1;
+
       if (
         !errorCounts.has(message) &&
         errorCounts.size >= MAX_DISTINCT_ERRORS
       ) {
         const overflowMessage =
           "Additional warnings suppressed to keep results manageable.";
+
         if (!errorCounts.has(overflowMessage)) {
           errorCounts.set(overflowMessage, 1);
           errors.push(overflowMessage);
         }
+
         return;
       }
+
       errorCounts.set(message, nextCount);
       if (nextCount === 1) errors.push(message);
     };
@@ -2197,6 +2332,7 @@ async function handleRebind({
       const nodeName = node && node.name ? node.name : "Unknown node";
       const failureField = getApplyFailureField(field, segmentRange);
       const dedupeKey = `${nodeId}|${failureField}|${variableId}`;
+
       if (!applyFailureKeys.has(dedupeKey)) {
         applyFailureKeys.add(dedupeKey);
         applyFailures.push({
@@ -2207,10 +2343,12 @@ async function handleRebind({
           reason: "apply_failed",
         });
       }
+
       recordVariableError(
         sourceVariableId || variableId,
         `Node "${nodeName}" field "${failureField}": failed to apply variable "${variableId}" after verification retry.`,
       );
+
       return false;
     };
 
@@ -2224,14 +2362,18 @@ async function handleRebind({
       retryApply,
     }) => {
       let applied = false;
+
       try {
         applied = !!(await verify());
       } catch (err) {
         recordVariableError(
           sourceVariableId || variableId,
-          `Node "${node && node.name ? node.name : "Unknown node"}" field "${getApplyFailureField(field, segmentRange)}": verification failed: ${String(err)}`,
+          `Node "${
+            node && node.name ? node.name : "Unknown node"
+          }" field "${getApplyFailureField(field, segmentRange)}": verification failed: ${String(err)}`,
         );
       }
+
       if (applied) return true;
 
       if (node && typeof node.loadAsync === "function") {
@@ -2259,8 +2401,11 @@ async function handleRebind({
       } catch (err) {
         recordVariableError(
           sourceVariableId || variableId,
-          `Node "${node && node.name ? node.name : "Unknown node"}" field "${getApplyFailureField(field, segmentRange)}": retry apply failed: ${String(err)}`,
+          `Node "${
+            node && node.name ? node.name : "Unknown node"
+          }" field "${getApplyFailureField(field, segmentRange)}": retry apply failed: ${String(err)}`,
         );
+
         return recordApplyFailure({
           sourceVariableId,
           node,
@@ -2275,7 +2420,9 @@ async function handleRebind({
       } catch (err) {
         recordVariableError(
           sourceVariableId || variableId,
-          `Node "${node && node.name ? node.name : "Unknown node"}" field "${getApplyFailureField(field, segmentRange)}": retry verification failed: ${String(err)}`,
+          `Node "${
+            node && node.name ? node.name : "Unknown node"
+          }" field "${getApplyFailureField(field, segmentRange)}": retry verification failed: ${String(err)}`,
         );
       }
 
@@ -2293,21 +2440,26 @@ async function handleRebind({
     // Build deduplicated toKey → { isLocal, localId } map
     const keyMeta = {};
     const targetKeyToSourceIds = {};
+
     const registerTargetSource = (toKey, sourceId) => {
       if (!toKey || !sourceId) return;
       const canonicalId = getCanonicalVariableId(sourceId, idRemap);
       if (!canonicalId) return;
+
       if (!targetKeyToSourceIds[toKey]) targetKeyToSourceIds[toKey] = new Set();
       targetKeyToSourceIds[toKey].add(canonicalId);
     };
+
     for (const { toKey, isLocal, localId } of mappings || []) {
       if (!toKey) continue;
       if (!keyMeta[toKey] || isLocal)
         keyMeta[toKey] = { isLocal: !!isLocal, localId };
     }
+
     for (const mapping of mappings || []) {
       registerTargetSource(mapping.toKey, mapping.fromId);
     }
+
     for (const mapping of Object.values(nodeMappings || {})) {
       const { toKey, isLocal, localId } = mapping;
       if (!toKey) continue;
@@ -2317,6 +2469,7 @@ async function handleRebind({
     }
 
     const keyToVariable = {};
+
     await pMap(
       Object.entries(keyMeta),
       async ([toKey, { isLocal, localId }]) => {
@@ -2331,6 +2484,7 @@ async function handleRebind({
         } catch (e) {
           const message = `Could not resolve variable key "${toKey}": ${e}`;
           recordError(message);
+
           for (const sourceId of Array.from(
             targetKeyToSourceIds[toKey] || [],
           )) {
@@ -2341,8 +2495,7 @@ async function handleRebind({
       LOAD_CONCURRENCY,
     );
 
-    // ── Build matching lookup maps ────────────────────────────────────────────
-
+    // ── Build matching lookup maps ───────────────────────────────────────────
     const idToTarget = {};
     const keyToTarget = {};
     const nameToTarget = {};
@@ -2350,8 +2503,10 @@ async function handleRebind({
     for (const { fromId, fromKey, toKey } of mappings || []) {
       if (toKey && keyToVariable[toKey]) {
         const tgt = keyToVariable[toKey];
+
         if (fromId) idToTarget[fromId] = tgt;
         if (fromKey) keyToTarget[fromKey] = tgt;
+
         const varName = (boundIdToName || {})[fromId];
         if (varName) nameToTarget[varName] = tgt;
       }
@@ -2370,6 +2525,7 @@ async function handleRebind({
       // Use composite key to allow multiple variable mappings on the same node
       const overrideKey = nodeId + "|" + sourceVariableKey;
       if (!nodeOverrides[overrideKey]) nodeOverrides[overrideKey] = [];
+
       nodeOverrides[overrideKey].push({
         sourceCollectionKey,
         sourceVariableKey,
@@ -2379,18 +2535,22 @@ async function handleRebind({
 
     const applyOverrideToDescendants = (node, overrideKey, targetVar) => {
       if (!node || !("children" in node)) return;
+
       const stack = [];
       for (let i = node.children.length - 1; i >= 0; i--) {
         stack.push(node.children[i]);
       }
+
       while (stack.length > 0) {
         const current = stack.pop();
+
         if (nodeById[current.id]) {
           if (!nodeOverrides[overrideKey]) nodeOverrides[overrideKey] = [];
           nodeOverrides[overrideKey].push({
             targetVariable: targetVar,
           });
         }
+
         if ("children" in current) {
           for (let i = current.children.length - 1; i >= 0; i--) {
             stack.push(current.children[i]);
@@ -2409,6 +2569,7 @@ async function handleRebind({
           debugWarn("nodeMappings: missing toKey or targetVar for key", key);
           return;
         }
+
         const targetVar = keyToVariable[toKey];
         if (!targetVar) {
           debugWarn(
@@ -2424,6 +2585,7 @@ async function handleRebind({
         // Also apply to all descendants that are in nodesToProcess
         // This handles cases where user maps a parent node but the variable is on a child
         let representativeNode = nodeById[nodeId];
+
         if (!representativeNode) {
           try {
             const resolved = await figma.getNodeByIdAsync(nodeId);
@@ -2452,7 +2614,7 @@ async function handleRebind({
       LOAD_CONCURRENCY,
     );
 
-    // ── Build stable varId→key cache ──────────────────────────────────────────
+    // ── Build stable varId→key cache ─────────────────────────────────────────
     // Primary source: scan-provided map (remote IDs can't be re-resolved fresh)
     const varIdToKeyCache = Object.assign({}, boundIdToKey || {});
     const keyToBoundName = {};
@@ -2468,6 +2630,7 @@ async function handleRebind({
       if (fromKey && fromCollectionKey)
         keyToCollectionKeyMap[fromKey] = fromCollectionKey;
     }
+
     for (const {
       fromVariableId,
       fromVariableKey,
@@ -2483,6 +2646,7 @@ async function handleRebind({
       if (fromVariableKey && sourceCollectionKey)
         keyToCollectionKeyMap[fromVariableKey] = sourceCollectionKey;
     }
+
     for (const [boundId, boundKey] of Object.entries(boundIdToKey || {})) {
       const boundName = (boundIdToName || {})[boundId];
       if (boundKey && boundName && !keyToBoundName[boundKey]) {
@@ -2525,6 +2689,7 @@ async function handleRebind({
       if (canonicalPaintId === sourceCanonicalId || paintId === sourceRawId) {
         return true;
       }
+
       if (
         sourceKey &&
         canonicalPaintId &&
@@ -2532,14 +2697,16 @@ async function handleRebind({
       ) {
         return true;
       }
+
       const paintName = getBoundVariableName(
         canonicalPaintId || paintId,
         canonicalPaintId ? varIdToKeyCache[canonicalPaintId] : null,
       );
+
       return !!(paintName && sourceName && paintName === sourceName);
     };
 
-    // ── Process nodes ─────────────────────────────────────────────────────────
+    // ── Process nodes ────────────────────────────────────────────────────────
     figma.ui.postMessage({
       type: "rebind-progress",
       message: "Applying remappings…",
@@ -2553,18 +2720,22 @@ async function handleRebind({
 
     for (let ni = 0; ni < nodesToProcess.length; ni++) {
       const node = nodesToProcess[ni];
+
       if (node.type === "TEXT" && typeof node.loadAsync === "function") {
         await node.loadAsync();
       } else if (typeof node.loadAsync === "function") {
         await node.loadAsync();
       }
+
       const hasMixedFills = hasTextRangeFillBindings(node);
       const textFillSegments =
         node.type === "TEXT" && hasMixedFills
           ? getCachedTextFillSegments(node, textSegmentCache)
           : null;
+
       const entries = getBoundVariableEntries(node, textFillSegments);
       const instance = getNearestInstance(node);
+
       const nodeLevelEntries = [];
       const segmentEntries = [];
       const otherEntries = [];
@@ -2584,13 +2755,15 @@ async function handleRebind({
           null;
 
         const nodeOverrideList = nodeOverrides[node.id + "|" + varKey] || [];
-
         let nodeOverrideTarget = null;
+
         for (const ov of nodeOverrideList) {
           if (!ov.sourceVariableKey) continue;
+
           const collectionMatch =
             !ov.sourceCollectionKey || ov.sourceCollectionKey === boundCollKey;
           const variableMatch = ov.sourceVariableKey === varKey;
+
           if (collectionMatch && variableMatch) {
             nodeOverrideTarget = ov.targetVariable;
             break;
@@ -2598,6 +2771,7 @@ async function handleRebind({
         }
 
         const boundVarName = getBoundVariableName(id, varKey);
+
         const varLevelTarget = !nodeOverrideTarget
           ? (varKey && keyToTarget[varKey]) ||
             idToTarget[id] ||
@@ -2605,6 +2779,7 @@ async function handleRebind({
           : null;
 
         const targetVariable = nodeOverrideTarget || varLevelTarget;
+
         if (!targetVariable) {
           skippedCount++;
           continue;
@@ -2641,6 +2816,7 @@ async function handleRebind({
           instanceId: instance ? instance.id : null,
         });
       }
+
       let nodeChanged = false;
       const isMixedFills = hasTextRangeFillBindings(node);
 
@@ -2675,6 +2851,7 @@ async function handleRebind({
                     entry.varKey,
                   ),
                 );
+
                 if (!matchedEntry || !matchedEntry.targetVariable) continue;
 
                 paints[i] = figma.variables.setBoundVariableForPaint(
@@ -2682,6 +2859,7 @@ async function handleRebind({
                   "color",
                   matchedEntry.targetVariable,
                 );
+
                 segmentChanged = true;
                 verifiedEntries.push({
                   entry: matchedEntry,
@@ -2733,6 +2911,7 @@ async function handleRebind({
                       typeof node.getStyledTextSegments === "function"
                         ? node.getStyledTextSegments(["fills"])
                         : [];
+
                     for (const retrySeg of retrySegments) {
                       if (
                         retrySeg.start !== seg.start ||
@@ -2740,16 +2919,20 @@ async function handleRebind({
                       ) {
                         continue;
                       }
+
                       const retryPaints = Array.isArray(retrySeg.fills)
                         ? [...retrySeg.fills]
                         : [];
+
                       if (!retryPaints[paintIndex]) continue;
+
                       retryPaints[paintIndex] =
                         figma.variables.setBoundVariableForPaint(
                           retryPaints[paintIndex],
                           "color",
                           verifiedEntry.targetVariable,
                         );
+
                       node.setRangeFills(
                         retrySeg.start,
                         retrySeg.end,
@@ -2759,16 +2942,20 @@ async function handleRebind({
                     }
                   },
                 });
+
                 if (!applied) continue;
+
                 nodeChanged = true;
                 appliedEntryIds.add(aliasId);
                 if (canonicalAliasId) appliedEntryIds.add(canonicalAliasId);
+
                 if (verifiedEntry.id || verifiedEntry.rawId) {
                   appliedEntryIds.add(verifiedEntry.id || verifiedEntry.rawId);
                   updatedVariableIds.add(
                     verifiedEntry.id || verifiedEntry.rawId,
                   );
                 }
+
                 updatedVariableIds.add(canonicalAliasId || aliasId);
               }
             }
@@ -2789,6 +2976,7 @@ async function handleRebind({
           for (const entry of nodeLevelEntries) {
             if (instance) {
               node.setBoundVariable("fills", entry.targetVariable);
+
               const applied = await verifyVariableApplication({
                 node,
                 field: "fills",
@@ -2800,9 +2988,11 @@ async function handleRebind({
                   node.setBoundVariable("fills", entry.targetVariable);
                 },
               });
+
               if (!applied) {
                 continue;
               }
+
               reboundCount++;
               nodeChanged = true;
               if (entry.id || entry.rawId) {
@@ -2813,6 +3003,7 @@ async function handleRebind({
 
             const paintIndex = entry.index !== null ? entry.index : 0;
             if (!paints[paintIndex]) continue;
+
             paints[paintIndex] = figma.variables.setBoundVariableForPaint(
               paints[paintIndex],
               "color",
@@ -2823,8 +3014,10 @@ async function handleRebind({
 
           if (fillsChanged) {
             node.fills = paints;
+
             for (const entry of nodeLevelEntries) {
               const paintIndex = entry.index !== null ? entry.index : 0;
+
               const applied = await verifyVariableApplication({
                 node,
                 field: "fills",
@@ -2837,6 +3030,7 @@ async function handleRebind({
                     ? [...node.fills]
                     : [];
                   if (!retryPaints[paintIndex]) return;
+
                   retryPaints[paintIndex] =
                     figma.variables.setBoundVariableForPaint(
                       retryPaints[paintIndex],
@@ -2846,7 +3040,9 @@ async function handleRebind({
                   node.fills = retryPaints;
                 },
               });
+
               if (!applied) continue;
+
               reboundCount++;
               nodeChanged = true;
               if (entry.id || entry.rawId) {
@@ -2860,31 +3056,41 @@ async function handleRebind({
           for (const entry of segmentEntries) {
             const { start, end } = entry.segmentRange || {};
             if (typeof start !== "number" || typeof end !== "number") continue;
+
             try {
               const segments =
                 typeof node.getStyledTextSegments === "function"
                   ? node.getStyledTextSegments(["fills"])
                   : [];
+
               let segApplied = false;
+
               for (const seg of segments) {
                 if (seg.start !== start || seg.end !== end) continue;
+
                 const paints = Array.isArray(seg.fills) ? [...seg.fills] : [];
                 const paintIndex = entry.index !== null ? entry.index : 0;
                 if (!paints[paintIndex]) continue;
+
                 paints[paintIndex] = figma.variables.setBoundVariableForPaint(
                   paints[paintIndex],
                   "color",
                   entry.targetVariable,
                 );
+
                 try {
                   node.setRangeFills(start, end, paints);
                 } catch (err) {
                   recordVariableError(
                     entry.id || entry.rawId,
-                    `Node "${node.name}" field "${getApplyFailureField(entry.field, entry.segmentRange)}": ${String(err)}`,
+                    `Node "${node.name}" field "${getApplyFailureField(
+                      entry.field,
+                      entry.segmentRange,
+                    )}": ${String(err)}`,
                   );
                   continue;
                 }
+
                 const applied = await verifyVariableApplication({
                   node,
                   field: entry.field,
@@ -2904,27 +3110,34 @@ async function handleRebind({
                       typeof node.getStyledTextSegments === "function"
                         ? node.getStyledTextSegments(["fills"])
                         : [];
+
                     for (const retrySeg of retrySegments) {
                       if (retrySeg.start !== start || retrySeg.end !== end)
                         continue;
+
                       const retryPaints = Array.isArray(retrySeg.fills)
                         ? [...retrySeg.fills]
                         : [];
                       if (!retryPaints[paintIndex]) continue;
+
                       retryPaints[paintIndex] =
                         figma.variables.setBoundVariableForPaint(
                           retryPaints[paintIndex],
                           "color",
                           entry.targetVariable,
                         );
+
                       node.setRangeFills(start, end, retryPaints);
                       return;
                     }
                   },
                 });
+
                 if (!applied) continue;
+
                 segApplied = true;
               }
+
               if (segApplied) {
                 reboundCount++;
                 nodeChanged = true;
@@ -2946,7 +3159,10 @@ async function handleRebind({
             } catch (err) {
               recordVariableError(
                 entry.id || entry.rawId,
-                `Node "${node.name}" field "${getApplyFailureField(entry.field, entry.segmentRange)}": ${String(err)}`,
+                `Node "${node.name}" field "${getApplyFailureField(
+                  entry.field,
+                  entry.segmentRange,
+                )}": ${String(err)}`,
               );
             }
           }
@@ -2975,6 +3191,7 @@ async function handleRebind({
             if (PAINT_FIELDS.has(field)) {
               if (instance) {
                 node.setBoundVariable(field, targetVariable);
+
                 const applied = await verifyVariableApplication({
                   node,
                   field,
@@ -2986,9 +3203,11 @@ async function handleRebind({
                     node.setBoundVariable(field, targetVariable);
                   },
                 });
+
                 if (!applied) {
                   continue;
                 }
+
                 reboundCount++;
                 nodeChanged = true;
                 if (id || rawId) updatedVariableIds.add(id || rawId);
@@ -2998,6 +3217,7 @@ async function handleRebind({
               // Per-segment TEXT paint rebinding
               if (segmentRange) {
                 const { start, end } = segmentRange;
+
                 // Segment entries are only produced for 'fills' (getStyledTextSegments
                 // does not support 'strokes'). Guard defensively.
                 if (field !== "fills") {
@@ -3011,21 +3231,26 @@ async function handleRebind({
                   );
                   continue;
                 }
+
                 const allSegs = textFillSegments || [];
                 const paintIdx = index !== null ? index : 0;
                 let segApplied = false;
+
                 for (const seg of allSegs) {
                   // Overlap: seg covers any part of [start, end)
                   if (seg.end <= start || seg.start >= end) continue;
                   if (!Array.isArray(seg[field]) || !seg[field][paintIdx])
                     continue;
+
                   const paint = seg[field][paintIdx];
                   const paintBv =
                     paint.boundVariables && paint.boundVariables.color;
+
                   // Only rebind this segment if it actually carries the variable we're targeting
                   // (avoids clobbering other variables on adjacent segments)
                   const paintId = paintBv && paintBv.id;
                   const canonicalPaintId = getCachedCanonicalId(paintId);
+
                   const isMatch = matchesPaintBinding(
                     paintId,
                     canonicalPaintId,
@@ -3034,7 +3259,9 @@ async function handleRebind({
                     boundVarName,
                     varKey,
                   );
+
                   if (!isMatch) continue;
+
                   const newPaints = [...seg[field]];
                   newPaints[paintIdx] =
                     figma.variables.setBoundVariableForPaint(
@@ -3042,9 +3269,11 @@ async function handleRebind({
                       "color",
                       targetVariable,
                     );
+
                   if (field === "fills")
                     node.setRangeFills(seg.start, seg.end, newPaints);
                   else node.setRangeStrokes(seg.start, seg.end, newPaints);
+
                   const applied = await verifyVariableApplication({
                     node,
                     field,
@@ -3064,6 +3293,7 @@ async function handleRebind({
                         typeof node.getStyledTextSegments === "function"
                           ? node.getStyledTextSegments(["fills"])
                           : [];
+
                       for (const retrySeg of retrySegments) {
                         if (
                           retrySeg.start !== seg.start ||
@@ -3071,16 +3301,19 @@ async function handleRebind({
                         ) {
                           continue;
                         }
+
                         const retryPaints = Array.isArray(retrySeg[field])
                           ? [...retrySeg[field]]
                           : [];
                         if (!retryPaints[paintIdx]) continue;
+
                         retryPaints[paintIdx] =
                           figma.variables.setBoundVariableForPaint(
                             retryPaints[paintIdx],
                             "color",
                             targetVariable,
                           );
+
                         node.setRangeFills(
                           retrySeg.start,
                           retrySeg.end,
@@ -3090,9 +3323,12 @@ async function handleRebind({
                       }
                     },
                   });
+
                   if (!applied) continue;
+
                   segApplied = true;
                 }
+
                 if (segApplied) {
                   reboundCount++;
                   nodeChanged = true;
@@ -3109,6 +3345,7 @@ async function handleRebind({
                       "]: no matching paint found (variable may have changed range)",
                   );
                 }
+
                 continue;
               }
 
@@ -3125,17 +3362,22 @@ async function handleRebind({
                 ) {
                   const segs = textFillSegments || [];
                   let segmentRebound = false;
+
                   for (const seg of segs) {
                     const segPaints = seg["fills"];
                     if (!Array.isArray(segPaints) || segPaints.length === 0)
                       continue;
+
                     const paintIdx = index !== null ? index : 0;
                     const paint = segPaints[paintIdx];
                     if (!paint) continue;
+
                     const paintBv =
                       paint.boundVariables && paint.boundVariables.color;
                     if (!paintBv || !paintBv.id) continue;
+
                     const canonicalPaintId = getCachedCanonicalId(paintBv.id);
+
                     const matches = matchesPaintBinding(
                       paintBv.id,
                       canonicalPaintId,
@@ -3144,7 +3386,9 @@ async function handleRebind({
                       boundVarName,
                       varKey,
                     );
+
                     if (!matches) continue;
+
                     const newPaints = [...segPaints];
                     newPaints[paintIdx] =
                       figma.variables.setBoundVariableForPaint(
@@ -3152,6 +3396,7 @@ async function handleRebind({
                         "color",
                         targetVariable,
                       );
+
                     try {
                       node.setRangeFills(seg.start, seg.end, newPaints);
                     } catch (err) {
@@ -3167,6 +3412,7 @@ async function handleRebind({
                       );
                       continue;
                     }
+
                     const applied = await verifyVariableApplication({
                       node,
                       field,
@@ -3186,6 +3432,7 @@ async function handleRebind({
                           typeof node.getStyledTextSegments === "function"
                             ? node.getStyledTextSegments(["fills"])
                             : [];
+
                         for (const retrySeg of retrySegments) {
                           if (
                             retrySeg.start !== seg.start ||
@@ -3193,16 +3440,19 @@ async function handleRebind({
                           ) {
                             continue;
                           }
+
                           const retryPaints = Array.isArray(retrySeg.fills)
                             ? [...retrySeg.fills]
                             : [];
                           if (!retryPaints[paintIdx]) continue;
+
                           retryPaints[paintIdx] =
                             figma.variables.setBoundVariableForPaint(
                               retryPaints[paintIdx],
                               "color",
                               targetVariable,
                             );
+
                           node.setRangeFills(
                             retrySeg.start,
                             retrySeg.end,
@@ -3212,9 +3462,12 @@ async function handleRebind({
                         }
                       },
                     });
+
                     if (!applied) continue;
+
                     segmentRebound = true;
                   }
+
                   if (segmentRebound) {
                     reboundCount++;
                     nodeChanged = true;
@@ -3232,6 +3485,7 @@ async function handleRebind({
                     if (typeof node.loadAsync === "function") {
                       await node.loadAsync();
                     }
+
                     const paintIdx = index !== null ? index : 0;
                     const reread = node[field];
 
@@ -3245,6 +3499,7 @@ async function handleRebind({
                           targetVariable,
                         );
                       node[field] = paints;
+
                       const applied = await verifyVariableApplication({
                         node,
                         field,
@@ -3257,6 +3512,7 @@ async function handleRebind({
                             ? [...node[field]]
                             : [];
                           if (!retryPaints[paintIdx]) return;
+
                           retryPaints[paintIdx] =
                             figma.variables.setBoundVariableForPaint(
                               retryPaints[paintIdx],
@@ -3266,7 +3522,9 @@ async function handleRebind({
                           node[field] = retryPaints;
                         },
                       });
+
                       if (!applied) continue;
+
                       reboundCount++;
                       nodeChanged = true;
                       if (id || rawId) updatedVariableIds.add(id || rawId);
@@ -3299,12 +3557,15 @@ async function handleRebind({
                     );
                   }
                 }
+
                 continue;
               }
 
               if (!Array.isArray(rawPaints)) continue;
+
               const paintIndex = index !== null ? index : 0;
               if (!rawPaints[paintIndex]) continue;
+
               const paints = [...rawPaints];
               paints[paintIndex] = figma.variables.setBoundVariableForPaint(
                 paints[paintIndex],
@@ -3312,6 +3573,7 @@ async function handleRebind({
                 targetVariable,
               );
               node[field] = paints;
+
               const applied = await verifyVariableApplication({
                 node,
                 field,
@@ -3323,6 +3585,7 @@ async function handleRebind({
                     ? [...node[field]]
                     : [];
                   if (!retryPaints[paintIndex]) return;
+
                   retryPaints[paintIndex] =
                     figma.variables.setBoundVariableForPaint(
                       retryPaints[paintIndex],
@@ -3332,11 +3595,13 @@ async function handleRebind({
                   node[field] = retryPaints;
                 },
               });
+
               if (!applied) {
                 continue;
               }
             } else {
               node.setBoundVariable(field, targetVariable);
+
               const applied = await verifyVariableApplication({
                 node,
                 field,
@@ -3347,10 +3612,12 @@ async function handleRebind({
                   node.setBoundVariable(field, targetVariable);
                 },
               });
+
               if (!applied) {
                 continue;
               }
             }
+
             reboundCount++;
             nodeChanged = true;
             if (id || rawId) updatedVariableIds.add(id || rawId);
@@ -3373,11 +3640,13 @@ async function handleRebind({
       const now = Date.now();
       if (now - lastProgressAt > PROGRESS_INTERVAL) {
         const pct = 30 + Math.round((ni / nodesToProcess.length) * 65);
+
         figma.ui.postMessage({
           type: "rebind-progress",
           message: `Processing node ${ni + 1} / ${nodesToProcess.length}…`,
           pct: Math.min(pct, 95),
         });
+
         lastProgressAt = now;
         await yieldTick();
       }
@@ -3402,7 +3671,9 @@ async function handleRebind({
     if (!dryRun && reboundCount > 0) {
       figma.commitUndo();
     }
+
     setRelaunchForRoots(scope, roots);
+
     figma.ui.postMessage({
       type: "rebind-result",
       reboundCount,
@@ -3430,7 +3701,7 @@ async function handleRebind({
   }
 }
 
-// ─── Select nodes in canvas ───────────────────────────────────────────────────
+// ─── Select nodes in canvas ───────────────────────────────────────────────────────
 
 async function handleSelectNodes({ nodeIds }) {
   try {
@@ -3438,6 +3709,7 @@ async function handleSelectNodes({ nodeIds }) {
 
     const resolveNodeIds = async (ids) => {
       const found = [];
+
       await pMap(
         ids,
         async (id) => {
@@ -3450,6 +3722,7 @@ async function handleSelectNodes({ nodeIds }) {
         },
         LOAD_CONCURRENCY,
       );
+
       return found;
     };
 
@@ -3466,12 +3739,14 @@ async function handleSelectNodes({ nodeIds }) {
 
     const uniqueResolved = [];
     const seenNodeIds = new Set();
+
     resolved.forEach((node) => {
       if (!seenNodeIds.has(node.id)) {
         seenNodeIds.add(node.id);
         uniqueResolved.push(node);
       }
     });
+
     resolved = uniqueResolved;
 
     if (resolved.length === 0) {
@@ -3504,7 +3779,7 @@ async function handleSelectNodes({ nodeIds }) {
   }
 }
 
-// ─── Router ───────────────────────────────────────────────────────────────────
+// ─── Router ─────────────────────────────────────────────────────────────────────
 
 figma.ui.onmessage = async (msg) => {
   switch (msg.type) {
@@ -3514,36 +3789,47 @@ figma.ui.onmessage = async (msg) => {
         preferences: await getUIPreferences(),
       });
       break;
+
     case "save-preferences":
       await saveUIPreferences(msg.preferences || {});
       break;
+
     case "scan":
       await handleScan(msg);
       break;
+
     case "cancel-scan":
       handleCancelScan();
       break;
+
     case "get-library-variables":
       await handleGetLibraryVariables(msg);
       break;
+
     case "get-variable-nodes":
       await handleGetVariableNodes(msg);
       break;
+
     case "get-node-details":
       await handleGetNodeDetails(msg);
       break;
+
     case "rebind":
       await handleRebind(msg);
       break;
+
     case "select-nodes":
       await handleSelectNodes(msg);
       break;
+
     case "resize":
       figma.ui.resize(msg.width, msg.height);
       break;
+
     case "close":
       figma.closePlugin();
       break;
+
     default:
       console.warn("Unknown message type:", msg.type);
   }
